@@ -1,0 +1,24 @@
+{
+	"name": "ai-web-tester",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"check": "biome check .",
+		"check:fix": "biome check --fix .",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"verify": "biome check . && tsc --noEmit && vitest run",
+		"setup": "npx playwright install chromium"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.4.9",
+		"@midscene/web": "1.6.0",
+		"@playwright/test": "1.58.2",
+		"dotenv": "16.5.0",
+		"playwright": "1.58.2",
+		"typescript": "6.0.2",
+		"vitest": "4.1.2"
+	}
+}

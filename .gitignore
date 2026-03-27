@@ -1,0 +1,6 @@
+node_modules/
+midscene_run/
+.taskp-tmp/
+.env
+*.log
+dist/
