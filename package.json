@@ -16,6 +16,7 @@
 		"@biomejs/biome": "2.4.9",
 		"@midscene/web": "1.6.0",
 		"@playwright/test": "1.58.2",
+		"@types/bun": "1.3.11",
 		"dotenv": "16.5.0",
 		"playwright": "1.58.2",
 		"typescript": "6.0.2",
