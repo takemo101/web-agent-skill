@@ -5,4 +5,4 @@ default_provider = "ollama"
 default_model = "qwen2.5-coder:7b"
 
 [ai.providers.ollama]
-base_url = "http://localhost:11434"
+base_url = "http://localhost:11434/v1"

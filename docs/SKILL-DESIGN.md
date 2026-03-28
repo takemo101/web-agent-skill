@@ -197,7 +197,7 @@ cp results/screenshots/*.png ~/Dropbox/evidence/
 taskp run web-agent
 
 # cron / CI: 全部指定、対話なし
-taskp run web-agent --no-input \
+taskp run web-agent --skip-prompt \
   --set url="https://example.com" \
   --set task="記事をスクショ" \
   --set after_command="slack-notify.sh"
@@ -503,7 +503,7 @@ taskp run web-agent
 
 ```bash
 # 毎朝9時に記事チェック
-0 9 * * * cd /path/to/project && taskp run web-agent --no-input \
+0 9 * * * cd /path/to/project && taskp run web-agent --skip-prompt \
   --set url="https://news.ycombinator.com" \
   --set task="トップ5記事のタイトルとURLを取得してスクショ" \
   --set after_command="slack-notify.sh" \

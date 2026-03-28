@@ -138,7 +138,7 @@ default_provider = "ollama"
 default_model = "qwen2.5-coder:7b"
 
 [ai.providers.ollama]
-base_url = "http://localhost:11434"
+base_url = "http://localhost:11434/v1"  # /v1 が必要（OpenAI互換エンドポイント）
 ```
 
 #### 6. 第2層の設定（Midscene Vision LLM）
@@ -218,7 +218,7 @@ default_provider = "ollama"
 default_model = "qwen2.5-coder:7b"
 
 [ai.providers.ollama]
-base_url = "http://localhost:11434"
+base_url = "http://localhost:11434/v1"  # /v1 が必要（OpenAI互換エンドポイント）
 ```
 
 ## Step 5: コード品質チェック
