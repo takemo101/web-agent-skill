@@ -1,6 +1,6 @@
 {
 	"$schema": "https://biomejs.dev/schemas/2.4.9/schema.json",
-	"organizeImports": {
+	"assist": {
 		"enabled": true
 	},
 	"formatter": {
@@ -25,6 +25,6 @@
 		}
 	},
 	"files": {
-		"ignore": ["node_modules", "midscene_run", ".taskp-tmp", "dist"]
+		"includes": ["**", "!node_modules", "!midscene_run", "!.taskp-tmp", "!.taskp", "!dist"]
 	}
 }
