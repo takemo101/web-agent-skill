@@ -54,30 +54,82 @@ npx playwright install chromium
 
 ### パターン A: 完全ローカル（無料）
 
+#### 1. Ollama のインストール
+
 ```bash
-# 1. Ollama のインストール
-brew install ollama  # macOS
-# Linux: curl -fsSL https://ollama.com/install.sh | sh
+# macOS
+brew install ollama
 
-# 2. モデルのダウンロード
+# Linux
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+#### 2. モデルのダウンロード
+
+2つのモデルが必要。第1層（コード生成）と第2層（Vision）で役割が異なる。
+
+```bash
 # 第1層: スクリプト生成用（テキストモデル）
-ollama pull qwen2.5-coder:7b
+ollama pull qwen2.5-coder:7b    # ~4.7GB
 
-# 第2層: ブラウザ操作用（Vision モデル）
-ollama pull qwen2.5-vl:7b
+# 第2層: ブラウザ操作用（Vision モデル）⚠️ 必ず Vision 対応モデル
+ollama pull qwen2.5-vl:7b       # ~4.7GB
+```
 
-# 3. Ollama の CORS 設定
+**⚠️ 第2層は Vision 対応モデルが必須。** `qwen2.5:7b`（テキストのみ）では動作しません。
+
+##### モデルの選択肢
+
+第1層（コード生成）:
+
+| モデル | サイズ | 品質 | 速度 |
+|--------|--------|:---:|:---:|
+| `qwen2.5-coder:7b`（推奨） | 4.7GB | ○ | ◎ |
+| `qwen2.5-coder:14b` | 9GB | ◎ | ○ |
+| `deepseek-coder-v2:16b` | 9GB | ◎ | ○ |
+| `codellama:7b` | 3.8GB | △ | ◎ |
+
+第2層（Vision、ブラウザ操作）:
+
+| モデル | サイズ | 精度 | 速度 |
+|--------|--------|:---:|:---:|
+| `qwen2.5-vl:7b`（推奨） | 4.7GB | ○ | ◎ |
+| `llama3.2-vision:11b` | 6.7GB | ○ | ○ |
+| `qwen2.5-vl:32b` | 19GB | ◎ | △ |
+
+#### 3. Ollama の CORS 設定
+
+Midscene からの API アクセスに必要。
+
+```bash
 # macOS
 launchctl setenv OLLAMA_ORIGINS "*"
+# → Ollama アプリを再起動
+
 # Linux（.bashrc に追記）
 echo 'export OLLAMA_ORIGINS="*"' >> ~/.bashrc
 source ~/.bashrc
-
-# 4. Ollama サーバーの起動確認
-ollama serve  # 別ターミナルで起動（既に起動していればスキップ）
+# → ollama serve を再起動
 ```
 
-taskp の設定:
+#### 4. Ollama の起動確認
+
+```bash
+# 起動（バックグラウンド or 別ターミナル）
+ollama serve
+
+# 動作確認
+curl http://localhost:11434/api/tags
+# → ダウンロード済みモデル一覧が表示される
+
+# モデル一覧確認
+ollama list
+# NAME                 ID            SIZE
+# qwen2.5-coder:7b     ...           4.7 GB
+# qwen2.5-vl:7b        ...           4.7 GB
+```
+
+#### 5. 第1層の設定（taskp Agent）
 
 ```toml
 # .taskp/config.toml
@@ -89,7 +141,7 @@ default_model = "qwen2.5-coder:7b"
 base_url = "http://localhost:11434"
 ```
 
-Midscene の設定:
+#### 6. 第2層の設定（Midscene Vision LLM）
 
 ```bash
 # .env
@@ -98,6 +150,31 @@ MIDSCENE_MODEL_BASE_URL=http://localhost:11434/v1
 MIDSCENE_MODEL_API_KEY=ollama
 MIDSCENE_MODEL_FAMILY=qwen-vl
 ```
+
+#### 7. ローカル動作確認
+
+```bash
+# 第1層の確認（テキスト生成）
+ollama run qwen2.5-coder:7b "console.log('hello') の TypeScript コードを書いて"
+
+# 第2層の確認（API互換エンドポイント）
+curl http://localhost:11434/v1/models
+
+# 全体の確認
+taskp run web-agent
+```
+
+#### ハードウェア要件
+
+| 項目 | 最低 | 推奨 |
+|------|------|------|
+| RAM | 16GB | 32GB |
+| VRAM（GPU） | 6GB | 8GB+ |
+| ストレージ | 10GB 空き | 20GB 空き |
+
+- **Apple Silicon Mac**: Metal で高速に動作（M1 以降推奨）
+- **NVIDIA GPU**: CUDA で高速（RTX 3060 以上推奨）
+- **CPU のみ**: 動作するが非常に遅い（1ステップ 30〜60秒）
 
 ### パターン B: クラウド API
 
@@ -211,15 +288,55 @@ curl http://localhost:11434/api/tags
 ollama serve
 ```
 
+Docker 内から Ollama に接続する場合:
+
+```bash
+# localhost ではなく host.docker.internal を使う
+MIDSCENE_MODEL_BASE_URL=http://host.docker.internal:11434/v1
+```
+
+### Midscene が 403 Forbidden を返す
+
+Ollama の CORS 設定が未反映。
+
+```bash
+# macOS: 設定後に Ollama アプリを再起動
+launchctl setenv OLLAMA_ORIGINS "*"
+# → メニューバーの Ollama アイコンから Quit → 再起動
+
+# Linux: 設定後に ollama serve を再起動
+export OLLAMA_ORIGINS="*"
+ollama serve
+```
+
 ### Midscene の Vision LLM がエラーになる
 
 ```bash
-# モデルが Vision 対応か確認
 # ❌ テキストのみモデル（動作しない）
 ollama pull qwen2.5:7b
 
 # ✅ Vision 対応モデル（正しい）
 ollama pull qwen2.5-vl:7b
+```
+
+MIDSCENE_MODEL_FAMILY の設定も確認:
+
+| モデル | MIDSCENE_MODEL_FAMILY |
+|--------|----------------------|
+| qwen2.5-vl | `qwen-vl` |
+| llama3.2-vision | `openai` |
+
+### 操作が非常に遅い
+
+```bash
+# GPU が使われているか確認（NVIDIA）
+nvidia-smi
+
+# Apple Silicon の場合は自動で Metal を使用
+# → 7B モデルなら 1ステップ 3〜10秒が目安
+
+# CPU のみの場合は小さいモデルに切り替え
+ollama pull qwen2.5-vl:3b    # より軽量
 ```
 
 ### レポートが生成されない
@@ -234,11 +351,21 @@ mkdir -p midscene_run/report
 
 ### taskp Agent がスクリプト生成に失敗する
 
-SKILL.md の Midscene API リファレンスセクションが LLM に十分なコンテキストを提供しているか確認する。モデルの品質が低い場合は、より高性能なモデルに切り替える。
+ローカルLLM の品質が不足している可能性。以下を試す:
 
 ```bash
-# CLI オプションでモデルを一時的に変更
+# 1. より大きなモデルに切り替え
+ollama pull qwen2.5-coder:14b
+# → .taskp/config.toml の default_model を変更
+
+# 2. 一時的にクラウドモデルを使用
 taskp run web-agent --model anthropic/claude-sonnet-4-20250514
+
+# 3. Ollama のコンテキストウィンドウを拡大
+# Modelfile を作成:
+#   FROM qwen2.5-coder:7b
+#   PARAMETER num_ctx 32768
+# → ollama create qwen2.5-coder-32k -f Modelfile
 ```
 
 ## ディレクトリ構成（セットアップ完了後）
