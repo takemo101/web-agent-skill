@@ -151,11 +151,38 @@ try {
 
 Midscene は失敗時もレポートにスクリーンショットを記録する。エラー箇所が視覚的に確認できる。
 
-## レポート設計
+## レポート・スクリーンショット設計
 
-### Midscene 自動生成レポート
+本ツールは2種類のスクリーンショットを出力する。
 
-Midscene は実行ごとに HTMLレポートを `midscene_run/report/` に生成する。
+### 出力の全体像
+
+```
+テスト実行
+  ↓
+┌──────────────────────────────────────────────────┐
+│ Midscene 自動生成                                 │
+│  - 各ステップのスクリーンショット（操作前後）       │
+│  - 操作内容・結果・エラー詳細                      │
+│  → midscene_run/report/<id>.html                  │
+└──────────────────────────────────────────────────┘
+  ↓
+┌──────────────────────────────────────────────────┐
+│ Playwright 個別撮影                               │
+│  - テスト完了時点の最終画面（成功・失敗どちらでも）│
+│  → results/screenshots/final.png                  │
+└──────────────────────────────────────────────────┘
+  ↓
+┌──────────────────────────────────────────────────┐
+│ ターミナル出力                                    │
+│  - ステップごとの ✅/❌ 結果                      │
+│  - スクリーンショットとレポートのファイルパス       │
+└──────────────────────────────────────────────────┘
+```
+
+### 1. Midscene 自動生成レポート（HTMLレポート）
+
+Midscene は実行ごとに HTMLレポートを `midscene_run/report/` に自動生成する。追加コード不要。
 
 ```
 midscene_run/
@@ -164,13 +191,15 @@ midscene_run/
     └── def456.html     # 過去の実行結果
 ```
 
-#### レポートの内容
+#### レポートの内容（ステップごと）
 
-- 各ステップのスクリーンショット（操作前後）
-- 操作内容（どのAPIを何の引数で呼んだか）
-- 成功/失敗のステータス
-- 失敗時のエラーメッセージ
-- 実行時間
+| 情報 | 説明 |
+|------|------|
+| 📸 スクリーンショット | 各操作の前後のページ画面 |
+| 🔍 操作内容 | どのAPIを何の引数で呼んだか |
+| ✅/❌ ステータス | 成功 or 失敗 |
+| ⏱ 実行時間 | 各ステップの所要時間 |
+| 💬 エラー詳細 | 失敗時のエラーメッセージ・スタックトレース |
 
 #### レポート形式オプション
 
@@ -184,6 +213,80 @@ const agent = new PlaywrightAgent(page, {
 });
 ```
 
+### 2. 最終スクリーンショット（個別PNG）
+
+テスト完了時点のページ画面を **Playwright で個別に撮影**して保存する。Midscene のレポートとは別に、単体ファイルとして使える。
+
+#### 保存先
+
+```
+results/
+└── screenshots/
+    └── final.png
+```
+
+#### 撮影コード
+
+テストスクリプトの `finally` ブロックで撮影する。成功時も失敗時も撮影される。
+
+```typescript
+import { mkdirSync } from "fs";
+
+const screenshotDir = "results/screenshots";
+mkdirSync(screenshotDir, { recursive: true });
+
+try {
+  // テストステップ実行
+  await agent.aiAct("...");
+  await agent.aiAssert("...");
+
+  // 成功時の最終スクリーンショット
+  await page.screenshot({
+    path: `${screenshotDir}/final.png`,
+    fullPage: false,
+  });
+} catch (error) {
+  // 失敗時のスクリーンショット（エラー発生時点の画面）
+  await page.screenshot({
+    path: `${screenshotDir}/final.png`,
+    fullPage: false,
+  });
+  throw error;
+} finally {
+  await browser.close();
+}
+```
+
+#### 用途
+
+| 用途 | 説明 |
+|------|------|
+| エビデンスとしての添付 | Slack/Discord/Issue に画像を直接貼れる |
+| 差分検出 | 前回のスクリーンショットと目視比較 |
+| CI アーティファクト | GitHub Actions の Artifacts に保存 |
+| 簡易確認 | HTMLレポートを開かずに結果を確認 |
+
+### 3. ターミナル出力
+
+テスト実行後にターミナルに出力される結果サマリ。TUI では画像表示ができないため、テキスト結果 + ファイルパスを出力する。
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ テスト成功 (3/3 ステップ完了)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+URL:    https://example.com/login
+時間:   8.3秒
+
+ステップ:
+  1. ✅ メールアドレス入力        (1.2s)
+  2. ✅ パスワード入力            (0.9s)
+  3. ✅ ログインボタンクリック     (2.1s)
+
+📸 最終スクリーンショット: results/screenshots/final.png
+📊 HTMLレポート: midscene_run/report/abc123.html
+```
+
 ### スクリーンショット品質
 
 ```typescript
@@ -193,6 +296,17 @@ const agent = new PlaywrightAgent(page, {
 
   // トークン節約: 1/2 に縮小（品質とコストのバランス）
   // screenshotShrinkFactor: 2,
+});
+```
+
+### 最終スクリーンショットの Playwright オプション
+
+```typescript
+await page.screenshot({
+  path: "results/screenshots/final.png",
+  fullPage: false,       // ビューポート内のみ（デフォルト）
+  // fullPage: true,     // ページ全体（長いページ向け）
+  // clip: { x: 0, y: 0, width: 800, height: 600 }, // 領域指定
 });
 ```
 

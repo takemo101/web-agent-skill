@@ -143,6 +143,7 @@ ai-web-tester/
 │           ├── SKILL.md               # メインスキル定義
 │           └── templates/
 │               └── test-runner.ts     # テストランナーのテンプレート
+├── src/                               # ヘルパースクリプト
 ├── docs/                              # 設計ドキュメント
 │   ├── README.md
 │   ├── CONCEPT.md
@@ -151,14 +152,19 @@ ai-web-tester/
 │   ├── MIDSCENE-INTEGRATION.md
 │   ├── MODEL-STRATEGY.md
 │   └── SETUP.md
-├── .env                               # 環境変数（APIキー等）
-├── .env.example                       # 環境変数テンプレート
-├── package.json                       # Midscene / Playwright 依存
+├── results/                           # テスト結果
+│   └── screenshots/
+│       └── final.png                  # 最終スクリーンショット
 ├── midscene_run/                      # Midscene 自動生成（gitignore）
 │   └── report/
-│       └── *.html
+│       └── *.html                     # 全ステップのスクリーンショット入りレポート
 ├── .taskp-tmp/                        # 一時ファイル（gitignore）
 │   └── test-run.ts
+├── .env                               # 環境変数（APIキー等）
+├── .env.example                       # 環境変数テンプレート
+├── package.json                       # 依存定義
+├── biome.json                         # Biome 設定
+├── tsconfig.json                      # TypeScript 設定
 ├── .gitignore
 └── README.md
 ```

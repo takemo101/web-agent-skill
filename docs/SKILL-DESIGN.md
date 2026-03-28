@@ -238,6 +238,127 @@ const HEADLESS = {{HEADLESS}};
 })();
 ```
 
+## レポート出力設計
+
+テスト実行完了後、以下の3種類の出力を生成する。
+
+### 出力一覧
+
+| 出力 | 内容 | 用途 |
+|------|------|------|
+| HTMLレポート | 全ステップのスクリーンショット + 操作内容 + 結果 | 詳細なエビデンス確認 |
+| 最終スクリーンショット | テスト完了時点のページ画像（PNG） | 単体エビデンス、共有用 |
+| ターミナル結果サマリ | テキスト形式の結果一覧 | 即時確認、CI出力 |
+
+### 出力ディレクトリ構成
+
+```
+ai-web-tester/
+├── midscene_run/
+│   └── report/
+│       └── <id>.html              # Midscene 自動生成 HTMLレポート
+└── results/
+    └── screenshots/
+        ├── final.png              # 最終状態のスクリーンショット
+        └── <test-id>_final.png    # テストID付き（複数回実行時）
+```
+
+### ターミナル出力フォーマット
+
+テスト実行後、Agent は以下のフォーマットで結果を報告すること。
+
+#### 成功時
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ テスト成功 (3/3 ステップ完了)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+URL:    https://example.com/login
+時間:   8.3秒
+
+ステップ:
+  1. ✅ メールアドレス入力        (1.2s)
+  2. ✅ パスワード入力            (0.9s)
+  3. ✅ ログインボタンクリック     (2.1s)
+
+📸 最終スクリーンショット:
+   results/screenshots/final.png
+
+📊 HTMLレポート（全ステップのスクリーンショット入り）:
+   midscene_run/report/abc123.html
+```
+
+#### 失敗時
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+❌ テスト失敗 (2/3 ステップ目で失敗)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+URL:    https://example.com/login
+時間:   12.5秒
+
+ステップ:
+  1. ✅ メールアドレス入力        (1.2s)
+  2. ✅ パスワード入力            (0.9s)
+  3. ❌ ログインボタンクリック     (5.0s)
+     エラー: 要素 "ログインボタン" が見つかりませんでした
+
+📸 失敗時のスクリーンショット:
+   results/screenshots/final.png
+
+📊 HTMLレポート（全ステップのスクリーンショット入り）:
+   midscene_run/report/abc123.html
+```
+
+### スクリプト生成時のルール
+
+Agent がテストスクリプトを生成する際、以下のコードを**末尾に必ず含める**こと。
+
+```typescript
+// テスト完了後（成功・失敗どちらでも）最終スクリーンショットを保存
+import { mkdirSync } from "fs";
+
+const screenshotDir = "results/screenshots";
+mkdirSync(screenshotDir, { recursive: true });
+
+try {
+  // ... テストステップ ...
+
+  // 成功時: 最終スクリーンショット
+  await page.screenshot({
+    path: `${screenshotDir}/final.png`,
+    fullPage: false,
+  });
+  console.log("✅ テスト成功");
+  console.log(`📸 最終スクリーンショット: ${screenshotDir}/final.png`);
+} catch (error) {
+  // 失敗時: エラー時点のスクリーンショット
+  await page.screenshot({
+    path: `${screenshotDir}/final.png`,
+    fullPage: false,
+  });
+  console.error("❌ テスト失敗:", (error as Error).message);
+  console.log(`📸 失敗時スクリーンショット: ${screenshotDir}/final.png`);
+  process.exit(1);
+} finally {
+  await browser.close();
+}
+```
+
+### レポートのブラウザ表示
+
+Agent はテスト完了後、`open` コマンドでレポートをブラウザで開くかユーザーに確認すること。
+
+```bash
+# macOS
+open midscene_run/report/abc123.html
+
+# Linux
+xdg-open midscene_run/report/abc123.html
+```
+
 ## マルチアクション版（v2）
 
 将来的に以下のアクションを追加する。
@@ -267,12 +388,21 @@ actions:
   list:
     description: 過去のテストレポート一覧を表示する
     mode: template
+  screenshot:
+    description: 最新のスクリーンショットを開く
+    mode: template
 ```
 
 ### action:report
 
 ```bash
-open $(ls -t midscene_run/report/*.html | head -1)
+REPORT=$(ls -t midscene_run/report/*.html 2>/dev/null | head -1)
+if [ -n "$REPORT" ]; then
+  echo "📊 レポート: $REPORT"
+  open "$REPORT" 2>/dev/null || xdg-open "$REPORT" 2>/dev/null
+else
+  echo "レポートがありません"
+fi
 ```
 
 ### action:list
@@ -280,6 +410,21 @@ open $(ls -t midscene_run/report/*.html | head -1)
 ```bash
 echo "=== テストレポート一覧 ==="
 ls -lt midscene_run/report/*.html 2>/dev/null || echo "レポートがありません"
+echo ""
+echo "=== スクリーンショット一覧 ==="
+ls -lt results/screenshots/*.png 2>/dev/null || echo "スクリーンショットがありません"
+```
+
+### action:screenshot
+
+```bash
+SCREENSHOT=$(ls -t results/screenshots/*.png 2>/dev/null | head -1)
+if [ -n "$SCREENSHOT" ]; then
+  echo "📸 スクリーンショット: $SCREENSHOT"
+  open "$SCREENSHOT" 2>/dev/null || xdg-open "$SCREENSHOT" 2>/dev/null
+else
+  echo "スクリーンショットがありません"
+fi
 ```
 
 ## 実行例

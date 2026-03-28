@@ -4,3 +4,6 @@ midscene_run/
 .env
 *.log
 dist/
+
+# スクリーンショットをgit管理しない場合はコメント解除
+# results/screenshots/
