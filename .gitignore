@@ -6,4 +6,4 @@ midscene_run/
 dist/
 
 # スクリーンショットをgit管理しない場合はコメント解除
-# results/screenshots/
+results/screenshots/
