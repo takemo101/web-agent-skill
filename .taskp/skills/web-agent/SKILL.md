@@ -69,6 +69,41 @@ mkdir -p {{__cwd__}}/.taskp-tmp
 - aiAct の指示は「今の画面を見ればわかる」レベルで具体的に書く（「さっきの」「それ」のような指示語は使えない）
 - `authDir` 配下にサイト名の JSON ファイル（例: `auth/example.json`）が存在する場合は `storageState` として使用する
 
+### 認証（ログイン状態の管理）
+
+#### storageState による自動復元
+
+`auth/<site-name>.json` に保存された Cookie / LocalStorage は、スクリプト実行時に自動的に復元されます。テンプレート（`agent-runner.ts`）は `AUTH_FILE` が指定され、かつファイルが存在する場合に `browser.newContext({ storageState: AUTH_FILE })` で復元します。
+
+#### ログイン状態の保存方法
+
+```bash
+bun run src/login.ts <url> <site-name>
+```
+
+headed モードでブラウザが開くので、手動でログインしてからターミナルで Enter を押してください。`auth/<site-name>.json` にセッションが保存されます。
+
+#### スクリプト生成時の AUTH_FILE 設定
+
+操作対象の URL のホスト名から site-name を導出し、`auth/` ディレクトリに対応する JSON ファイルが存在する場合は `AUTH_FILE` にそのパスを設定してください。存在しない場合は空文字 `""` を設定してください。
+
+例:
+- `https://github.com/...` → `auth/github.json` があれば `AUTH_FILE = "auth/github.json"`
+- `https://admin.example.com/dashboard` → `auth/admin.example.com.json` があれば `AUTH_FILE = "auth/admin.example.com.json"`
+- 認証不要 or ファイルなし → `AUTH_FILE = ""`
+
+#### ログイン状態の有効期限検知
+
+認証が必要なサイトを操作するスクリプトでは、操作開始前にログイン状態を確認してください:
+
+```typescript
+const isLoggedIn = await agent.aiBoolean("ログイン済みか？");
+if (!isLoggedIn) {
+	console.error("❌ セッション期限切れ: bun run src/login.ts <url> <site-name> で再ログイン");
+	process.exit(1);
+}
+```
+
 ### Step 2: スクリプトの実行
 
 `bash` ツールで以下のコマンドを実行してください:

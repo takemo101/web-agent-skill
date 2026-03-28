@@ -5,5 +5,8 @@ midscene_run/
 *.log
 dist/
 
+# 認証ファイル（Cookie/LocalStorage）をgit管理しない
+auth/*.json
+
 # スクリーンショットをgit管理しない場合はコメント解除
 results/screenshots/

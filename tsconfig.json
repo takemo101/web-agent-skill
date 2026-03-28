@@ -10,7 +10,8 @@
 		"resolveJsonModule": true,
 		"isolatedModules": true,
 		"verbatimModuleSyntax": true,
-		"lib": ["ES2024"]
+		"lib": ["ES2024"],
+		"types": ["bun-types"]
 	},
 	"include": ["src/**/*.ts"],
 	"exclude": ["node_modules", ".taskp-tmp", "midscene_run"]
