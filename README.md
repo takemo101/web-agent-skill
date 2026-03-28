@@ -1,45 +1,53 @@
-# ai-web-tester
+# web-agent
 
-AIによる自然言語Webテスト実行ツール。
+AIによる汎用ブラウザ操作エージェント。
 
-サイトURLとテスト内容を自然言語で入力すると、AIがブラウザを操作してテストを実行し、スクリーンショット付きのレポートを生成する。[taskp](https://github.com/takemo101/taskp) のスキルとして動作する。
+自然言語で「やりたいこと」を指示すると、AIがブラウザを自律操作し、スクリーンショット撮影やデータ取得を行い、完了後に指定コマンドを実行する。[taskp](https://github.com/takemo101/taskp) のスキルとして動作する。
 
 ## 特徴
 
-- **自然言語でテスト記述** — 「ログインボタンをクリックして、メールアドレスを入力する」
-- **スクリーンショット付きレポート** — 各ステップの画面を自動記録
+- **自然言語で操作指示** — 「記事を開いてスクショを撮って」「フォームに入力して送信して」
+- **自律的なページ操作** — Vision LLM がページを見て判断・操作
+- **スクリーンショット撮影** — 任意のタイミングで画面をキャプチャ
+- **完了後コマンド実行** — 操作結果を後続のスクリプトやツールに連携
 - **ローカルLLM対応** — Ollama で完全無料実行可能
-- **ヘッドレス/headed切替** — CI実行もデバッグも対応
-- **taskp スキル** — 既存の taskp エコシステムに統合
+- **定期実行対応** — cron / CI と組み合わせて自動化
+
+## ユースケース
+
+```bash
+# 記事をチェックしてスクショ → Slack通知
+taskp run web-agent
+  URL: https://news.example.com
+  やること: テック系注目記事トップ3のスクショを撮る
+  完了後: slack-notify.sh
+
+# 管理画面のデータ取得 → 分析スクリプト実行
+taskp run web-agent
+  URL: https://admin.example.com
+  やること: 今月の売上データを取得してスクショ
+  完了後: python analyze.py
+
+# 定期的な投稿
+taskp run web-agent
+  URL: https://sns.example.com
+  やること: 「本日のビルド完了しました」と投稿する
+  完了後: echo "投稿完了" >> log/history.txt
+```
 
 ## クイックスタート
 
 ```bash
 # 依存インストール
-npm install
-npx playwright install chromium
+bun install
+bun run setup
 
 # LLM設定（.env を編集）
 cp .env.example .env
 
 # 実行
-taskp run web-test
+taskp run web-agent
 ```
-
-## 使い方
-
-```bash
-taskp run web-test
-```
-
-対話式で以下を入力：
-
-1. **テスト対象URL** — `https://example.com/login`
-2. **テスト手順** — 自然言語で操作手順を記述
-3. **期待結果** — テスト合格の判定基準（省略可）
-4. **ヘッドレスモード** — Yes/No
-
-実行後、`midscene_run/report/` にHTMLレポートが生成される。
 
 ## 技術スタック
 
@@ -48,8 +56,9 @@ taskp run web-test
 | スキル実行基盤 | [taskp](https://github.com/takemo101/taskp) |
 | ブラウザ自動化 | [Midscene.js](https://github.com/web-infra-dev/midscene) |
 | ブラウザエンジン | [Playwright](https://playwright.dev/) (Chromium) |
-| LLM（スクリプト生成） | Claude / GPT / Ollama |
-| LLM（Vision） | Qwen2.5-VL / GPT-4o / Gemini |
+| lint + format | [Biome](https://biomejs.dev/) 2.4.9 |
+| 型チェック | TypeScript 6.0.2 |
+| テスト | [Vitest](https://vitest.dev/) 4.1.2 |
 
 ## ドキュメント
 

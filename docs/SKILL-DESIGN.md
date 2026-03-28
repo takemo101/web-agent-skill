@@ -4,29 +4,29 @@
 
 | 項目 | 値 |
 |------|-----|
-| スキル名 | `web-test` |
-| 配置先 | `.taskp/skills/web-test/SKILL.md` |
-| 実行モード | `agent`（LLM がテストスクリプトを生成・実行） |
+| スキル名 | `web-agent` |
+| 配置先 | `.taskp/skills/web-agent/SKILL.md` |
+| 実行モード | `agent`（LLM が操作スクリプトを生成・実行） |
 | 使用ツール | `bash`, `read`, `write` |
 
 ## フロントマター設計
 
 ```yaml
 ---
-name: web-test
-description: サイトURLとテスト内容を自然言語で入力すると、AIがブラウザを操作してテストを実行する
+name: web-agent
+description: 自然言語で指示した内容をAIがブラウザで自律操作する
 mode: agent
 inputs:
   - name: url
     type: text
-    message: "テスト対象のサイトURLは？"
+    message: "操作対象のURLは？"
     validate: "^https?://"
-  - name: test_steps
+  - name: task
     type: textarea
-    message: "テストの流れを自然言語で入力してください（例: ログインボタンをクリックして、メールアドレスを入力する）"
-  - name: expected
-    type: textarea
-    message: "期待される結果は？（空欄の場合はテスト手順の実行成功をもって合格とします）"
+    message: "やりたいことを自然言語で入力してください"
+  - name: after_command
+    type: text
+    message: "完了後に実行するコマンドは？（空欄でスキップ）"
     required: false
   - name: headless
     type: confirm
@@ -48,46 +48,48 @@ tools:
 | 型 | `text` |
 | 必須 | はい |
 | バリデーション | `^https?://` — http/https で始まること |
-| 用途 | テスト対象ページの開始URL |
+| 用途 | 操作対象ページの開始URL |
 
-入力例:
-- `https://example.com/login`
-- `https://staging.myapp.com/dashboard`
-
-### test_steps
+### task
 
 | 項目 | 値 |
 |------|-----|
 | 型 | `textarea` |
 | 必須 | はい |
-| 用途 | テストの操作手順を自然言語で記述 |
+| 用途 | やりたいことを自然言語で記述 |
 
 入力例:
 ```
-1. メールアドレス欄に test@example.com を入力する
-2. パスワード欄に password123 を入力する
-3. ログインボタンをクリックする
-4. ダッシュボードが表示されるのを待つ
+テック系の注目記事トップ3のタイトルとURLを取得して、
+各記事ページのスクリーンショットを撮る
 ```
 
-番号付きリストでも、自由文でも受け付ける。LLM が解釈して適切な Midscene API 呼び出しに変換する。
+```
+管理画面にログインして、今月の売上データを取得する。
+ダッシュボードのスクショも撮っておく
+```
 
-### expected
+```
+投稿フォームに「本日のビルド完了しました」と入力して送信する
+```
+
+### after_command
 
 | 項目 | 値 |
 |------|-----|
-| 型 | `textarea` |
+| 型 | `text` |
 | 必須 | いいえ |
-| 用途 | テスト合格の判定基準 |
+| 用途 | 操作完了後に実行するシェルコマンド |
 
 入力例:
 ```
-- ダッシュボード画面に遷移していること
-- ユーザー名「テストユーザー」が表示されていること
-- サイドバーにメニュー項目が表示されていること
+slack-notify.sh
+python analyze.py --data results/data.json
+echo "完了: $(date)" >> log/history.txt
+cp results/screenshots/*.png ~/Dropbox/evidence/
 ```
 
-空欄の場合は、テスト手順が最後までエラーなく実行できれば合格とする。
+空欄の場合はコマンド実行をスキップする。
 
 ### headless
 
@@ -97,334 +99,244 @@ tools:
 | デフォルト | `true` |
 | 用途 | ブラウザの表示/非表示切替 |
 
-- `true` — ヘッドレス（CI/定時実行向け、ブラウザ非表示）
-- `false` — headed（デバッグ時、実際のブラウザが表示される）
-
 ## SKILL.md 本文設計
 
-本文は taskp の agent モードで LLM に渡されるプロンプトとなる。以下の情報を構造的に記述する。
-
-### 1. テスト情報セクション
-
-変数展開でユーザー入力を埋め込む。
+### 1. 操作情報セクション
 
 ```markdown
-## テスト対象
+## 操作対象
 
 - **URL**: {{url}}
 - **ヘッドレスモード**: {{headless}}
 
-## テスト手順
+## やりたいこと
 
-{{test_steps}}
+{{task}}
 
-{{#if expected}}
-## 期待される結果
+{{#if after_command}}
+## 完了後コマンド
 
-{{expected}}
+操作が完了したら以下のコマンドを実行してください:
+
+\`\`\`
+{{after_command}}
+\`\`\`
 {{/if}}
 ```
 
 ### 2. 実行手順セクション
 
-LLM に「何をすべきか」を明確に指示する。
-
 ```markdown
 ## 実行手順
 
-以下の手順でテストを実行してください。
+### Step 1: 操作スクリプトの生成
 
-### Step 1: テストスクリプトの生成
-
-`{{__skill_dir__}}/templates/test-runner.ts` を参考にして、上記のテスト手順を Midscene API で実装したスクリプトを `{{__cwd__}}/.taskp-tmp/test-run.ts` に生成してください。
+`{{__skill_dir__}}/templates/agent-runner.ts` を参考にして、上記の操作内容を Midscene API で実装したスクリプトを `{{__cwd__}}/.taskp-tmp/agent-run.ts` に生成してください。
 
 ### Step 2: スクリプトの実行
 
 bash ツールで以下のコマンドを実行してください:
 
 \`\`\`
-npx tsx {{__cwd__}}/.taskp-tmp/test-run.ts
+bun run {{__cwd__}}/.taskp-tmp/agent-run.ts
 \`\`\`
 
-### Step 3: 結果の報告
+### Step 3: 完了後コマンドの実行
 
-- テスト成功時: 「✅ テスト成功」と報告し、レポートファイルのパスを表示
-- テスト失敗時: 「❌ テスト失敗」と報告し、失敗理由とレポートファイルのパスを表示
+スクリプトが正常終了した場合、after_command が指定されていれば実行してください。
+スクリプトの stdout に出力されたデータは、完了後コマンドにパイプで渡せます。
+
+### Step 4: 結果の報告
+
+以下を報告してください:
+- 実行した操作の概要
+- 保存されたスクリーンショットのパス
+- HTMLレポートのパス
+- 完了後コマンドの実行結果（該当する場合）
 ```
 
 ### 3. Midscene API リファレンスセクション
 
-LLM が正しいコードを生成するためのガイド。
-
 ```markdown
 ## Midscene API リファレンス
 
-スクリプト生成時は以下の API のみを使用してください。
-
-### 操作系
+### 自律操作（Auto Planning）
 
 | API | 用途 | 例 |
 |-----|------|-----|
-| `agent.aiAct(prompt)` | 複数ステップの操作を自動プランニング | `'検索ボックスに "iPhone" と入力して検索ボタンを押す'` |
-| `agent.aiTap(target)` | 要素をクリック | `'ログインボタン'` |
-| `agent.aiInput(target, {value})` | テキスト入力 | `'メールアドレス欄', {value: 'test@example.com'}` |
-| `agent.aiKeyboardPress(target, {keyName})` | キー押下 | `'検索欄', {keyName: 'Enter'}` |
-| `agent.aiScroll(target, opts)` | スクロール | `'商品リスト', {direction: 'down'}` |
+| `agent.aiAct(prompt)` | 複雑な操作を自律的に実行 | `'記事を開いてコメントを書いて投稿する'` |
+| `agent.ai(prompt)` | aiAct の短縮形 | `'ログインボタンを押す'` |
 
-### 検証系
+aiAct は内部でループを回し、毎回スクリーンショットを撮って次の操作を判断する。
+1つの aiAct に複数ステップの指示を含めてよい。
 
-| API | 用途 | 例 |
-|-----|------|-----|
-| `agent.aiAssert(condition)` | 条件を検証（失敗でエラー） | `'ログイン成功メッセージが表示されている'` |
-| `agent.aiWaitFor(condition, opts)` | 条件成立まで待機 | `'検索結果が表示されている', {timeoutMs: 10000}` |
-
-### データ取得系
+### 直接操作（Instant Action）
 
 | API | 用途 | 例 |
 |-----|------|-----|
-| `agent.aiQuery(schema)` | ページからデータ抽出 | `'{title: string, price: number}[]'` |
-| `agent.aiBoolean(question)` | Yes/No 判定 | `'商品は在庫ありか？'` |
+| `agent.aiTap(target)` | 要素をクリック | `'投稿ボタン'` |
+| `agent.aiInput(target, {value})` | テキスト入力 | `'検索欄', {value: 'キーワード'}` |
+| `agent.aiKeyboardPress(target, {keyName})` | キー押下 | `'入力欄', {keyName: 'Enter'}` |
+| `agent.aiScroll(target, opts)` | スクロール | `'記事一覧', {direction: 'down'}` |
+
+### データ取得
+
+| API | 用途 | 例 |
+|-----|------|-----|
+| `agent.aiQuery(schema)` | ページからデータ抽出 | `'{title: string, url: string}[]'` |
+| `agent.aiBoolean(question)` | Yes/No 判定 | `'ログイン済みか？'` |
+| `agent.aiString(question)` | テキスト取得 | `'ページタイトルは？'` |
+
+### 待機・確認
+
+| API | 用途 | 例 |
+|-----|------|-----|
+| `agent.aiWaitFor(condition, opts)` | 条件成立まで待機 | `'ページが読み込まれた', {timeoutMs: 10000}` |
+| `agent.aiAssert(condition)` | 条件を検証 | `'投稿完了メッセージが表示されている'` |
+
+### スクリーンショット（Playwright）
+
+| API | 用途 |
+|-----|------|
+| `await page.screenshot({path: '...', fullPage: false})` | ビューポート内をキャプチャ |
+| `await page.screenshot({path: '...', fullPage: true})` | ページ全体をキャプチャ |
 
 ### 重要な注意事項
 
-- 各 aiAct の指示は「今の画面を見ればわかる」レベルで具体的に書くこと
-- 「さっきの」「それ」のような参照は使えない（各呼び出しは独立）
+- aiAct は「今の画面を見て判断する」ため、前の操作を覚えていない
+- 「さっきの」「それ」のような指示語は使えない
 - ページ遷移後は aiWaitFor で遷移完了を待つこと
-- aiAssert が失敗するとエラーが throw される
+- スクリーンショットは `results/screenshots/` に保存すること
+- 抽出データは console.log で stdout に出力すること
 ```
 
-## テストランナーテンプレート
-
-`.taskp/skills/web-test/templates/test-runner.ts` に配置する、スクリプト生成の参考テンプレート。
-
-```typescript
-import { chromium } from "playwright";
-import { PlaywrightAgent } from "@midscene/web/playwright";
-import "dotenv/config";
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-// 設定
-const URL = "{{URL}}";
-const HEADLESS = {{HEADLESS}};
-
-(async () => {
-  const browser = await chromium.launch({
-    headless: HEADLESS,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  });
-
-  const page = await browser.newPage();
-  await page.setViewportSize({ width: 1280, height: 768 });
-  await page.goto(URL);
-  await sleep(3000); // 初期ロード待ち
-
-  const agent = new PlaywrightAgent(page);
-
-  try {
-    // === テスト手順 ===
-    // ここに Midscene API を使ったテスト手順を書く
-
-    // === 期待結果の検証 ===
-    // ここに aiAssert を使った検証を書く
-
-    console.log("✅ テスト成功");
-  } catch (error) {
-    console.error("❌ テスト失敗:", (error as Error).message);
-    process.exit(1);
-  } finally {
-    await browser.close();
-  }
-})();
-```
-
-## レポート出力設計
-
-テスト実行完了後、以下の3種類の出力を生成する。
+## レポート・スクリーンショット出力設計
 
 ### 出力一覧
 
-| 出力 | 内容 | 用途 |
-|------|------|------|
-| HTMLレポート | 全ステップのスクリーンショット + 操作内容 + 結果 | 詳細なエビデンス確認 |
-| 最終スクリーンショット | テスト完了時点のページ画像（PNG） | 単体エビデンス、共有用 |
-| ターミナル結果サマリ | テキスト形式の結果一覧 | 即時確認、CI出力 |
-
-### 出力ディレクトリ構成
-
-```
-ai-web-tester/
-├── midscene_run/
-│   └── report/
-│       └── <id>.html              # Midscene 自動生成 HTMLレポート
-└── results/
-    └── screenshots/
-        ├── final.png              # 最終状態のスクリーンショット
-        └── <test-id>_final.png    # テストID付き（複数回実行時）
-```
-
-### ターミナル出力フォーマット
-
-テスト実行後、Agent は以下のフォーマットで結果を報告すること。
-
-#### 成功時
-
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✅ テスト成功 (3/3 ステップ完了)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-URL:    https://example.com/login
-時間:   8.3秒
-
-ステップ:
-  1. ✅ メールアドレス入力        (1.2s)
-  2. ✅ パスワード入力            (0.9s)
-  3. ✅ ログインボタンクリック     (2.1s)
-
-📸 最終スクリーンショット:
-   results/screenshots/final.png
-
-📊 HTMLレポート（全ステップのスクリーンショット入り）:
-   midscene_run/report/abc123.html
-```
-
-#### 失敗時
-
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-❌ テスト失敗 (2/3 ステップ目で失敗)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-URL:    https://example.com/login
-時間:   12.5秒
-
-ステップ:
-  1. ✅ メールアドレス入力        (1.2s)
-  2. ✅ パスワード入力            (0.9s)
-  3. ❌ ログインボタンクリック     (5.0s)
-     エラー: 要素 "ログインボタン" が見つかりませんでした
-
-📸 失敗時のスクリーンショット:
-   results/screenshots/final.png
-
-📊 HTMLレポート（全ステップのスクリーンショット入り）:
-   midscene_run/report/abc123.html
-```
+| 出力 | 生成元 | 保存先 | 用途 |
+|------|--------|--------|------|
+| HTMLレポート | Midscene 自動 | `midscene_run/report/*.html` | 全ステップのスクリーンショット + 操作内容 |
+| スクリーンショット | Playwright 個別撮影 | `results/screenshots/*.png` | エビデンス、共有、後続処理 |
+| 抽出データ | stdout / ファイル | `results/data/` | 完了後コマンドへの入力 |
 
 ### スクリプト生成時のルール
 
-Agent がテストスクリプトを生成する際、以下のコードを**末尾に必ず含める**こと。
+Agent がスクリプトを生成する際、以下を守ること:
+
+1. **スクリーンショットは `results/screenshots/` に保存**する
+2. **最終状態のスクリーンショットは必ず撮る**（成功・失敗どちらでも）
+3. **抽出データは `console.log` で stdout に出力**する（JSON 推奨）
+4. **完了後コマンドが指定されている場合は操作完了後に bash で実行**する
+5. **ディレクトリは `mkdirSync` で事前作成**する
 
 ```typescript
-// テスト完了後（成功・失敗どちらでも）最終スクリーンショットを保存
 import { mkdirSync } from "fs";
 
-const screenshotDir = "results/screenshots";
-mkdirSync(screenshotDir, { recursive: true });
+mkdirSync("results/screenshots", { recursive: true });
 
 try {
-  // ... テストステップ ...
+  // ... 操作 ...
 
-  // 成功時: 最終スクリーンショット
-  await page.screenshot({
-    path: `${screenshotDir}/final.png`,
-    fullPage: false,
-  });
-  console.log("✅ テスト成功");
-  console.log(`📸 最終スクリーンショット: ${screenshotDir}/final.png`);
+  // 最終スクリーンショット
+  await page.screenshot({ path: "results/screenshots/final.png" });
+  console.log("✅ 操作完了");
 } catch (error) {
-  // 失敗時: エラー時点のスクリーンショット
-  await page.screenshot({
-    path: `${screenshotDir}/final.png`,
-    fullPage: false,
-  });
-  console.error("❌ テスト失敗:", (error as Error).message);
-  console.log(`📸 失敗時スクリーンショット: ${screenshotDir}/final.png`);
+  await page.screenshot({ path: "results/screenshots/error.png" });
+  console.error("❌ 操作失敗:", (error as Error).message);
   process.exit(1);
 } finally {
   await browser.close();
 }
 ```
 
-### レポートのブラウザ表示
+### ターミナル出力フォーマット
 
-Agent はテスト完了後、`open` コマンドでレポートをブラウザで開くかユーザーに確認すること。
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ 操作完了
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-```bash
-# macOS
-open midscene_run/report/abc123.html
+URL:    https://news.example.com
+操作:   テック系注目記事トップ3を取得
 
-# Linux
-xdg-open midscene_run/report/abc123.html
+実行内容:
+  1. ✅ トップページ表示         (2.1s)
+  2. ✅ テックカテゴリに移動     (1.5s)
+  3. ✅ 記事3件のスクショ撮影    (4.2s)
+
+📸 スクリーンショット:
+   results/screenshots/article-1.png
+   results/screenshots/article-2.png
+   results/screenshots/article-3.png
+   results/screenshots/final.png
+
+📊 HTMLレポート:
+   midscene_run/report/abc123.html
+
+🔧 完了後コマンド実行: slack-notify.sh
+   → 正常終了 (exit 0)
 ```
 
 ## マルチアクション版（v2）
 
-将来的に以下のアクションを追加する。
-
 ```yaml
 actions:
   run:
-    description: テストを実行する
+    description: ブラウザ操作を実行する
     inputs:
       - name: url
         type: text
-        message: "テスト対象のURL"
-      - name: test_steps
+        message: "操作対象のURL"
+      - name: task
         type: textarea
-        message: "テスト手順"
-      - name: expected
-        type: textarea
-        message: "期待結果（空欄可）"
+        message: "やりたいこと"
+      - name: after_command
+        type: text
+        message: "完了後コマンド（空欄可）"
         required: false
       - name: headless
         type: confirm
         message: "ヘッドレスモード？"
         default: true
+  login:
+    description: サイトにログインしてセッションを保存する
+    mode: agent
+    inputs:
+      - name: url
+        type: text
+        message: "ログインページのURL"
+      - name: site_name
+        type: text
+        message: "サイト名（保存用）"
   report:
-    description: 最新のテストレポートをブラウザで開く
-    mode: template
-  list:
-    description: 過去のテストレポート一覧を表示する
+    description: 最新のレポートをブラウザで開く
     mode: template
   screenshot:
     description: 最新のスクリーンショットを開く
     mode: template
 ```
 
-### action:report
+### action:login
 
-```bash
-REPORT=$(ls -t midscene_run/report/*.html 2>/dev/null | head -1)
-if [ -n "$REPORT" ]; then
-  echo "📊 レポート: $REPORT"
-  open "$REPORT" 2>/dev/null || xdg-open "$REPORT" 2>/dev/null
-else
-  echo "レポートがありません"
-fi
-```
+headed モードでブラウザを開き、ユーザーが手動でログイン → Cookie を保存。
 
-### action:list
+```typescript
+// headed モードで起動（ユーザーが操作する）
+const browser = await chromium.launch({ headless: false });
+const context = await browser.newContext();
+const page = await context.newPage();
+await page.goto(url);
 
-```bash
-echo "=== テストレポート一覧 ==="
-ls -lt midscene_run/report/*.html 2>/dev/null || echo "レポートがありません"
-echo ""
-echo "=== スクリーンショット一覧 ==="
-ls -lt results/screenshots/*.png 2>/dev/null || echo "スクリーンショットがありません"
-```
+console.log("ブラウザでログインしてください...");
+console.log("ログイン完了後、ターミナルで Enter を押してください");
 
-### action:screenshot
+// ユーザーの入力を待つ
+await new Promise((resolve) => process.stdin.once("data", resolve));
 
-```bash
-SCREENSHOT=$(ls -t results/screenshots/*.png 2>/dev/null | head -1)
-if [ -n "$SCREENSHOT" ]; then
-  echo "📸 スクリーンショット: $SCREENSHOT"
-  open "$SCREENSHOT" 2>/dev/null || xdg-open "$SCREENSHOT" 2>/dev/null
-else
-  echo "スクリーンショットがありません"
-fi
+// セッション保存
+await context.storageState({ path: `auth/${siteName}.json` });
+console.log(`✅ セッション保存: auth/${siteName}.json`);
 ```
 
 ## 実行例
@@ -432,24 +344,22 @@ fi
 ### コマンド
 
 ```bash
-taskp run web-test
+taskp run web-agent
 ```
 
 ### TUI での入力
 
 ```
-? テスト対象のサイトURLは？
-> https://example.com/login
+? 操作対象のURLは？
+> https://news.ycombinator.com
 
-? テストの流れを自然言語で入力してください
-> 1. メールアドレスに test@example.com を入力
-> 2. パスワードに password123 を入力
-> 3. ログインボタンをクリック
+? やりたいことを自然言語で入力してください
+> トップページの記事タイトルとポイント数を上位5件取得して、
+> 各記事のスクリーンショットを撮る
 > [Meta+Enter で確定]
 
-? 期待される結果は？
-> ダッシュボード画面に遷移し、ようこそメッセージが表示されること
-> [Meta+Enter で確定]
+? 完了後に実行するコマンドは？（空欄でスキップ）
+> echo "$(cat results/data/articles.json)" | jq .
 
 ? ヘッドレスモードで実行しますか？ [Y/n]
 > Y
@@ -458,13 +368,37 @@ taskp run web-test
 ### 出力
 
 ```
-🔄 テストスクリプトを生成中...
-📝 .taskp-tmp/test-run.ts に書き出しました
-🚀 テスト実行中...
+🔄 操作スクリプトを生成中...
+📝 .taskp-tmp/agent-run.ts に書き出しました
+🚀 実行中...
 
-Midscene - report file updated: midscene_run/report/abc123.html
+✅ 操作完了
 
-✅ テスト成功
+📸 スクリーンショット:
+   results/screenshots/article-1.png
+   results/screenshots/article-2.png
+   results/screenshots/article-3.png
+   results/screenshots/article-4.png
+   results/screenshots/article-5.png
+   results/screenshots/final.png
 
-📊 レポート: midscene_run/report/abc123.html
+📊 HTMLレポート: midscene_run/report/abc123.html
+
+🔧 完了後コマンド実行:
+[
+  {"title": "Show HN: ...", "points": 342},
+  {"title": "Ask HN: ...", "points": 285},
+  ...
+]
+```
+
+### 定期実行（cron）
+
+```bash
+# 毎朝9時に記事チェック
+0 9 * * * cd /path/to/project && taskp run web-agent --no-input \
+  --set url="https://news.ycombinator.com" \
+  --set task="トップ5記事のタイトルとURLを取得してスクショ" \
+  --set after_command="slack-notify.sh" \
+  --set headless=true
 ```
