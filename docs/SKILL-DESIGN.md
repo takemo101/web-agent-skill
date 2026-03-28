@@ -9,6 +9,37 @@
 | 実行モード | `agent`（LLM が操作スクリプトを生成・実行） |
 | 使用ツール | `bash`, `read`, `write` |
 
+## 設定の3層構造
+
+スキルの設定値は役割に応じて3つの場所に分離する。
+
+```
+┌─────────────────────────────────────────────────────┐
+│ 毎回変わるもの → inputs（TUI で入力）               │
+│   url, task, after_command                           │
+├─────────────────────────────────────────────────────┤
+│ たまに変えるもの → inputs + default（--set で上書き）│
+│   headless                                           │
+├─────────────────────────────────────────────────────┤
+│ 固定設定 → config.json（context で読み込み）         │
+│   screenshotDir, authDir, viewport, timeout 等       │
+├─────────────────────────────────────────────────────┤
+│ 機密情報 → .env（環境変数）                          │
+│   MIDSCENE_MODEL_NAME, API キー等                    │
+└─────────────────────────────────────────────────────┘
+```
+
+### なぜ分離するか
+
+| 設定値 | inputs | config.json | .env |
+|--------|:---:|:---:|:---:|
+| 毎回変わる（url, task） | ✅ | — | — |
+| デフォルトで十分（headless） | ✅ default | — | — |
+| プロジェクト固有の固定値 | — | ✅ | — |
+| 機密情報（APIキー） | — | — | ✅ |
+| git 管理 | ✅ | ✅ | ❌ |
+| cron で上書き | `--set` | — | 環境変数 |
+
 ## フロントマター設計
 
 ```yaml
@@ -17,6 +48,7 @@ name: web-agent
 description: 自然言語で指示した内容をAIがブラウザで自律操作する
 mode: agent
 inputs:
+  # --- 毎回入力するもの ---
   - name: url
     type: text
     message: "操作対象のURLは？"
@@ -28,15 +60,74 @@ inputs:
     type: text
     message: "完了後に実行するコマンドは？（空欄でスキップ）"
     required: false
+  # --- たまに変えるもの（デフォルトあり）---
   - name: headless
     type: confirm
     message: "ヘッドレスモードで実行しますか？（Noで実際のブラウザが表示されます）"
     default: true
+context:
+  # --- 固定設定を読み込み ---
+  - type: file
+    path: "{{__skill_dir__}}/config.json"
 tools:
   - bash
   - read
   - write
 ---
+```
+
+## config.json 設計
+
+スキルディレクトリに配置する固定設定。`context` で SKILL.md に自動読み込みされ、LLM が参照する。
+
+```
+.taskp/skills/web-agent/
+├── SKILL.md
+├── config.json          ← 固定設定
+└── templates/
+    └── agent-runner.ts
+```
+
+```json
+{
+  "screenshotDir": "results/screenshots",
+  "authDir": "auth",
+  "timeout": 30000,
+  "viewport": {
+    "width": 1280,
+    "height": 768
+  },
+  "waitAfterAction": 500,
+  "replanningCycleLimit": 20
+}
+```
+
+### 設定項目
+
+| キー | 型 | デフォルト | 説明 |
+|------|-----|-----------|------|
+| `screenshotDir` | string | `"results/screenshots"` | スクリーンショット保存先 |
+| `authDir` | string | `"auth"` | ログイン状態（storageState）の保存先 |
+| `timeout` | number | `30000` | 操作全体のタイムアウト（ms） |
+| `viewport.width` | number | `1280` | ブラウザのビューポート幅 |
+| `viewport.height` | number | `768` | ブラウザのビューポート高さ |
+| `waitAfterAction` | number | `500` | 各操作後の待機時間（ms） |
+| `replanningCycleLimit` | number | `20` | aiAct の自律操作最大サイクル数 |
+
+### config.json を変更する場面
+
+```bash
+# スクショ保存先を変えたい
+→ "screenshotDir": "~/Dropbox/evidence"
+
+# モバイルサイトをテストしたい
+→ "viewport": { "width": 375, "height": 812 }
+
+# 重いサイトでタイムアウトする
+→ "timeout": 60000
+
+# 複雑な操作が途中で止まる
+→ "replanningCycleLimit": 40
 ```
 
 ## 入力設計
@@ -98,6 +189,22 @@ cp results/screenshots/*.png ~/Dropbox/evidence/
 | 型 | `confirm` |
 | デフォルト | `true` |
 | 用途 | ブラウザの表示/非表示切替 |
+
+### 実行パターン
+
+```bash
+# 通常: TUI で url と task を入力、他はデフォルト
+taskp run web-agent
+
+# cron / CI: 全部指定、対話なし
+taskp run web-agent --no-input \
+  --set url="https://example.com" \
+  --set task="記事をスクショ" \
+  --set after_command="slack-notify.sh"
+
+# デバッグ: headed モードで実行
+taskp run web-agent --set headless=false
+```
 
 ## SKILL.md 本文設計
 
