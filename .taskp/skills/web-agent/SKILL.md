@@ -68,6 +68,8 @@ mkdir -p {{__cwd__}}/.taskp-tmp
 - `bun run` でスクリプト実行する（tsx ではなく bun）
 - aiAct の指示は「今の画面を見ればわかる」レベルで具体的に書く（「さっきの」「それ」のような指示語は使えない）
 - `authDir` 配下にサイト名の JSON ファイル（例: `auth/example.json`）が存在する場合は `storageState` として使用する
+- **finally ブロックで `process.exit()` を必ず呼ぶ**こと（Midscene 内部タイマーでプロセスがハングするため）
+- `let exitCode = 0` を try の前に宣言し、catch で `exitCode = 1` に設定、finally で `process.exit(exitCode)` を呼ぶパターンを使う
 
 ### 認証（ログイン状態の管理）
 

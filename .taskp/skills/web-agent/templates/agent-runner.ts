@@ -43,6 +43,7 @@ const agent = new PlaywrightAgent(page, {
 	replanningCycleLimit: REPLANNING_CYCLE_LIMIT,
 });
 
+let exitCode = 0;
 try {
 	// === 操作 ===
 	// ここに LLM がユーザーの指示に応じた操作手順を書く
@@ -78,7 +79,8 @@ try {
 		// ブラウザクラッシュ等でスクショも撮れない場合は無視
 	}
 	console.error("❌ 操作失敗:", (error as Error).message);
-	throw error;
+	exitCode = 1;
 } finally {
 	await browser.close();
+	process.exit(exitCode);
 }
