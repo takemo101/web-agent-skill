@@ -1,4 +1,4 @@
-# web-agent 設計ドキュメント
+# web-agent-skill 設計ドキュメント
 
 ## ドキュメント一覧
 

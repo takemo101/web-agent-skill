@@ -1,4 +1,4 @@
-# SETUP — セットアップ手順（web-agent）
+# SETUP — セットアップ手順（web-agent-skill）
 
 ## 前提条件
 
@@ -244,7 +244,7 @@ taskp run web-agent --model anthropic/claude-sonnet-4-20250514
 ## ディレクトリ構成（セットアップ完了後）
 
 ```
-web-agent/
+web-agent-skill/
 ├── .taskp/
 │   ├── config.toml                     # ✅ taskp 設定
 │   └── skills/
