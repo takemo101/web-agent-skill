@@ -59,16 +59,18 @@ mkdir -p {{__cwd__}}/.taskp-tmp
 {{__skill_dir__}}/templates/runner.ts
 ```
 
-テンプレートを元に、操作内容を実装したスクリプトを `{{__cwd__}}/.taskp-tmp/agent-run.ts` に `write` ツールで生成してください。
+テンプレートを参考に、以下の設定値を埋め込んだスクリプトを `{{__cwd__}}/.taskp-tmp/agent-run.ts` に `write` ツールで生成してください。
 
-**テンプレートのプレースホルダーを埋める:**
+**スクリプト冒頭で以下の定数を必ず設定すること（テンプレート内の二重波括弧を以下の値に置き換える）:**
 
-| プレースホルダー | 値 |
-|----------------|-----|
-| `\{{TARGET_URL}}` | {{url}} |
-| `\{{CDP_ENDPOINT}}` | config.json の `cdpEndpoint` |
-| `\{{SCREENSHOT_DIR}}` | config.json の `screenshotDir` |
-| `\{{TIMEOUT}}` | config.json の `timeout` |
+```typescript
+const TARGET_URL = "{{url}}";
+const CDP_ENDPOINT = process.env.CDP_ENDPOINT || "http://localhost:9222";
+const SCREENSHOT_DIR = "results/screenshots";
+const TIMEOUT = 30000;
+```
+
+> 上記は config.json のデフォルト値です。config.json に異なる値がある場合はそちらを使ってください。
 
 **スクリプト生成ルール:**
 
