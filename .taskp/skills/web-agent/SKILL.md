@@ -61,12 +61,16 @@ mkdir -p {{__cwd__}}/.taskp-tmp
 
 テンプレートを参考に、以下の設定値を埋め込んだスクリプトを `{{__cwd__}}/.taskp-tmp/agent-run.ts` に `write` ツールで生成してください。
 
-**スクリプト冒頭で以下の定数を必ず設定すること:**
+**スクリプト冒頭で以下の定数を必ず設定すること（テンプレート内の二重波括弧を以下の値に置き換える）:**
 
-- `TARGET_URL` → 上記「操作対象」セクションの URL をそのまま文字列で設定する
-- `CDP_ENDPOINT` → `process.env.CDP_ENDPOINT || "http://localhost:9222"`
-- `SCREENSHOT_DIR` → `"results/screenshots"`
-- `TIMEOUT` → `30000`
+```typescript
+const TARGET_URL = "{{url}}";
+const CDP_ENDPOINT = process.env.CDP_ENDPOINT || "http://localhost:9222";
+const SCREENSHOT_DIR = "results/screenshots";
+const TIMEOUT = 30000;
+```
+
+> 上記は config.json のデフォルト値です。config.json に異なる値がある場合はそちらを使ってください。
 
 **重要: CDP接続は必須です。** スクリプトは必ず `chromium.connectOverCDP()` を使って既存のChromeに接続してください。CDP接続エラーが発生した場合は、ユーザーに「Chromeを `--remote-debugging-port=9222` で起動してください」と案内して停止してください。`chromium.launch()` への切り替えや storageState によるフォールバックは**絶対にしないでください**。
 
