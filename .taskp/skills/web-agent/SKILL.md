@@ -10,63 +10,45 @@ inputs:
   - name: task
     type: textarea
     message: "やりたいことを自然言語で入力してください"
-  - name: after_command
-    type: text
-    message: "完了後に実行するコマンドは？（空欄でスキップ）"
-    required: false
-context:
-  - type: file
-    path: "{{__skill_dir__}}/config.json"
 tools:
   - bash
-  - read
-  - write
 ---
 
-## 操作対象
-
 URL: {{url}}
+タスク: {{task}}
 
-## やりたいこと
+## 手順
 
-{{task}}
-
-## 実行手順
-
-### Step 1: APIリファレンスを読む
-
-read ツールで以下のファイルを読み、使えるアクションを把握する:
-
-```
-{{__skill_dir__}}/api-reference.md
-```
-
-### Step 2: REPLサーバー起動
+### 1. サーバー確認
 
 ```bash
-npx tsx {{__cwd__}}/src/repl-server.ts &
-sleep 3
 curl -s http://localhost:3000/health
 ```
 
-`{"ok":true}` が返れば準備完了。
+`{"ok":true}` なら次へ。エラーなら「REPLサーバーが起動していません。`npx tsx src/repl-server.ts` を別ターミナルで起動してください」と案内して停止。
 
-### Step 3: ページ移動と観察
+### 2. ページ移動と観察
 
 ```bash
-curl --json '{"action":"goto","args":{"url":"操作対象のURL"}}' http://localhost:3000/exec
+curl --json '{"action":"goto","args":{"url":"{{url}}"}}' http://localhost:3000/exec
 curl --json '{"action":"observe"}' http://localhost:3000/exec
 ```
 
-observe結果のボタン・入力欄・リンクを確認してから操作を開始する。
+observeの結果でボタン・入力欄・リンク名を確認する。
 
-### Step 4: 操作（1つずつ実行、結果を見て次を決める）
+### 3. 操作（1つずつ実行）
 
-**curl で1操作ずつ実行。スクリプトファイルは生成しない。**
+```bash
+curl --json '{"action":"fillField","args":{"description":"入力欄名","value":"値"}}' http://localhost:3000/exec
+curl --json '{"action":"clickButton","args":{"description":"ボタン名"}}' http://localhost:3000/exec
+curl --json '{"action":"screenshot","args":{"path":"results/screenshots/step.png"}}' http://localhost:3000/exec
+```
 
-失敗時: description を変えて再試行。3回失敗したら observe で状態確認。
+使えるaction: goto, clickButton, clickLink, click, fillField, selectOption, check, uncheck, waitForText, waitForUrl, waitForVisible, extractText, extractTexts, observe, screenshot, shutdown
 
-### Step 5: 完了
+失敗時はdescriptionを変えて再試行。observeで正しい名前を確認。
+
+### 4. 完了
 
 ```bash
 curl --json '{"action":"screenshot","args":{"path":"results/screenshots/final.png"}}' http://localhost:3000/exec
