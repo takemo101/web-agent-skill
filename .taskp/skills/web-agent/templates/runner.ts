@@ -67,7 +67,9 @@ try {
 	}
 	exitCode = 1;
 } finally {
-	await page.close();
+	if (exitCode === 0) {
+		await page.close();
+	}
 	await browser.close();
 	process.exit(exitCode);
 }
