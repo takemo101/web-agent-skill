@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { resolve } from "node:path";
 
@@ -18,12 +18,19 @@ interface ExecRequestBody {
 	timeoutMs?: number;
 }
 
+interface RecordedAction {
+	action: string;
+	args?: Record<string, unknown>;
+}
+
 interface Session {
 	id: string;
 	page: Page;
 	rootAgent: WebAgent;
 	currentAgent: WebAgent;
 	busy: boolean;
+	history: RecordedAction[];
+	failed: boolean;
 }
 
 const CONFIG_PATH = resolve(process.cwd(), ".taskp/skills/web-agent/config.json");
@@ -146,16 +153,32 @@ async function getOrCreateSession(id: string): Promise<Session> {
 
 	const page = await context.newPage();
 	const rootAgent = createAgent(page);
-	const session: Session = { id, page, rootAgent, currentAgent: rootAgent, busy: false };
+	const session: Session = { id, page, rootAgent, currentAgent: rootAgent, busy: false, history: [], failed: false };
 	sessions.set(id, session);
 	return session;
 }
 
-async function destroySession(id: string): Promise<void> {
+const SCRIPTS_DIR = resolve(process.cwd(), "results/scripts");
+
+function saveSessionScript(session: Session): string | null {
+	if (session.failed || session.history.length === 0) return null;
+
+	mkdirSync(SCRIPTS_DIR, { recursive: true });
+	const safeName = session.id.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 100);
+	const filename = `${safeName}.json`;
+	const filepath = resolve(SCRIPTS_DIR, filename);
+	writeFileSync(filepath, JSON.stringify({ session: session.id, actions: session.history }, null, 2));
+	return filepath;
+}
+
+async function destroySession(id: string): Promise<string | null> {
 	const session = sessions.get(id);
-	if (!session) return;
+	if (!session) return null;
+
+	const savedPath = saveSessionScript(session);
 	sessions.delete(id);
 	await session.page.close().catch(() => {});
+	return savedPath;
 }
 
 const shutdownServer = async (): Promise<void> => {
@@ -231,8 +254,26 @@ function buildRunAction(session: Session) {
 				return page.evaluate(code);
 			},
 			close: async () => {
-				await destroySession(session.id);
-				return "session closed";
+				const savedPath = await destroySession(session.id);
+				return savedPath ? { closed: true, script: savedPath } : { closed: true, script: null };
+			},
+			replay: async () => {
+				const scriptPath = String(args.path ?? "");
+				const raw = JSON.parse(readFileSync(scriptPath, "utf-8")) as { actions: RecordedAction[] };
+				const results: Array<{ action: string; ok: boolean; error?: string }> = [];
+
+				for (const recorded of raw.actions) {
+					try {
+						const stepRunner = buildRunAction(session);
+						await stepRunner({ action: recorded.action, args: recorded.args });
+						results.push({ action: recorded.action, ok: true });
+					} catch (e) {
+						results.push({ action: recorded.action, ok: false, error: e instanceof Error ? e.message : "unknown" });
+						break;
+					}
+				}
+
+				return { replayed: results.length, total: raw.actions.length, results };
 			},
 		};
 
@@ -288,9 +329,18 @@ const server = createServer(async (req, res) => {
 		const runAction = buildRunAction(session);
 		const result = await runAction(body);
 
+		const recordable = body.action !== "observe" && body.action !== "close";
+		if (recordable) {
+			session.history.push({
+				action: body.action,
+				...(body.args && Object.keys(body.args).length > 0 ? { args: body.args } : {}),
+			});
+		}
+
 		const state = sessions.has(sessionId) ? await getPageState(session.page) : { url: "closed", title: "closed" };
 		sendJson(res, 200, { ok: true, result, session: sessionId, state, meta: { durationMs: Date.now() - startAt } });
 	} catch (error) {
+		session.failed = true;
 		const state = sessions.has(sessionId) ? await getPageState(session.page) : { url: "closed", title: "closed" };
 		sendJson(res, 200, {
 			ok: false,
