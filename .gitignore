@@ -1,12 +1,7 @@
 node_modules/
-chrome/
 .taskp-tmp/
 .env
 *.log
 dist/
-
-# 認証ファイル（Cookie/LocalStorage）をgit管理しない
-auth/*.json
-
-# 実行結果をgit管理しない
 results/
+tmp/

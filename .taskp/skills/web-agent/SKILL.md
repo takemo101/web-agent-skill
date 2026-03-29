@@ -11,7 +11,7 @@ inputs:
     type: textarea
     message: "やりたいことを自然言語で入力してください"
 tools:
-  - bash
+  - mcp:playwriter
 ---
 
 URL: {{url}}
@@ -19,40 +19,46 @@ URL: {{url}}
 
 ## 手順
 
-### 1. サーバー確認
+### 1. ページに移動してスナップショットを取得
 
-```bash
-curl -s http://localhost:3000/health
+```javascript
+await page.goto("{{url}}"); await snapshot({ page })
 ```
 
-`{"ok":true}` なら次へ。エラーなら「REPLサーバーが起動していません。`npx tsx src/repl-server.ts` を別ターミナルで起動してください」と案内して停止。
+snapshotの結果でページ上の要素（aria-ref）を確認してから操作を開始する。
 
-### 2. ページ移動と観察
+### 2. 操作（1つずつ実行）
 
-```bash
-curl --json '{"action":"goto","args":{"url":"{{url}}"}}' 'http://localhost:3000/exec?session={{url}}'
-curl --json '{"action":"observe"}' 'http://localhost:3000/exec?session={{url}}'
+snapshotで確認したaria-refを使って操作する。1操作ずつexecuteを呼ぶこと。
+
+```javascript
+await page.locator('aria-ref=e3').fill('テキスト')
 ```
 
-observeの結果でボタン・入力欄・リンク名を確認する。
-
-### 3. 操作（1つずつ実行）
-
-```bash
-curl --json '{"action":"fillField","args":{"description":"入力欄名","value":"値"}}' 'http://localhost:3000/exec?session={{url}}'
-curl --json '{"action":"clickButton","args":{"description":"ボタン名"}}' 'http://localhost:3000/exec?session={{url}}'
-curl --json '{"action":"screenshot","args":{"path":"results/screenshots/step.png"}}' 'http://localhost:3000/exec?session={{url}}'
+```javascript
+await page.locator('aria-ref=e7').click()
 ```
 
-使えるaction: goto, clickButton, clickLink, click, fillField, selectOption, check, uncheck, waitForText, waitForUrl, waitForVisible, extractText, extractTexts, observe, screenshot, close
-
-全curlに `?session={{url}}` を付けること。closeは自分のセッション(タブ)だけ閉じる。
-
-失敗時はdescriptionを変えて再試行。observeで正しい名前を確認。
-
-### 4. 完了
-
-```bash
-curl --json '{"action":"screenshot","args":{"path":"results/screenshots/final.png"}}' 'http://localhost:3000/exec?session={{url}}'
-curl --json '{"action":"close"}' 'http://localhost:3000/exec?session={{url}}'
+操作後にページが変わったらsnapshotを再取得:
+```javascript
+await snapshot({ page })
 ```
+
+### 3. スクリーンショット
+
+```javascript
+await screenshotWithAccessibilityLabels({ page })
+```
+
+### 4. データ抽出
+
+```javascript
+const data = await page.evaluate(() => document.title); console.log(data)
+```
+
+### ルール
+
+- 1回のexecuteに複雑なスクリプトを書かない。1操作ずつ実行する
+- snapshot()で要素を確認してからaria-refで操作する
+- 失敗したらsnapshotを再取得して別のaria-refを試す
+- screenshotWithAccessibilityLabelsでスクショを撮る（page.screenshotではない）

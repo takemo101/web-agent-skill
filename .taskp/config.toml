@@ -1,0 +1,4 @@
+[mcp.servers.playwriter]
+transport = "stdio"
+command = "npx"
+args = ["-y", "playwriter@latest"]
