@@ -229,6 +229,56 @@ if (!isLoggedIn) {
 }
 ```
 
+## Bridge Mode（Chrome 拡張接続）
+
+### 概要
+
+Bridge Mode は Midscene v1.6 で追加された接続方式。Chrome 拡張機能を介してユーザーのデスクトップ Chrome を直接操作する。既存の Cookie、ログイン状態、拡張機能をそのまま利用できるため、storageState の保存・復元が不要になる。
+
+### 基本パターン
+
+```typescript
+import { AgentOverChromeBridge } from "@midscene/web/bridge-mode";
+
+const agent = new AgentOverChromeBridge({
+  generateReport: true,
+  autoPrintReportMsg: true,
+  replanningCycleLimit: 20,
+});
+
+// ユーザーの Chrome で新しいタブを開いて遷移
+await agent.connectNewTabWithUrl("https://example.com");
+
+// 通常の Midscene API と同じように操作
+await agent.aiAct("記事のタイトルとURLを一覧取得する");
+const articles = await agent.aiQuery("{title: string, url: string}[], 記事一覧");
+console.log(JSON.stringify(articles, null, 2));
+
+// 終了（browser.close() の代わり）
+await agent.destroy();
+```
+
+### PlaywrightAgent との比較
+
+| 項目 | PlaywrightAgent | AgentOverChromeBridge |
+|------|----------------|----------------------|
+| ブラウザ | Playwright が起動した Chromium | ユーザーの既存 Chrome |
+| Cookie / セッション | storageState で復元 | Chrome のセッションをそのまま使用 |
+| 拡張機能 | 原則なし | Chrome にインストール済みのものを使用 |
+| headless | 可能 | 不可（Chrome を表示したまま動作） |
+| `page.screenshot()` | 使用可能 | 使用不可（`page` オブジェクトなし） |
+| viewport 制御 | 自由に設定可能 | 現在の Chrome ウィンドウサイズに依存 |
+| 前提条件 | Playwright インストール | Midscene Chrome 拡張のインストール |
+
+### 制限事項（Bridge Mode 固有）
+
+| 制限 | 説明 |
+|------|------|
+| `page` オブジェクトなし | `page.screenshot()`、`page.goto()` 等の Playwright API は使用不可 |
+| viewport 固定 | Chrome ウィンドウのサイズがそのまま使われる。実行中に手動でリサイズすると影響あり |
+| headless 不可 | Chrome を表示したまま動作するため、GUI 環境が必要 |
+| 無視されるオプション | `userAgent`、`viewportWidth`、`viewportHeight`、`deviceScaleFactor`、`waitForNetworkIdle`、`cookie` など Playwright 固有のオプションは効果なし |
+
 ## 制限事項
 
 | 制限 | 説明 | 対策 |

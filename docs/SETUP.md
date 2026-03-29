@@ -48,6 +48,29 @@ bun install
 npx playwright install chromium
 ```
 
+## Step 3b: Bridge Mode のセットアップ（任意）
+
+Bridge Mode を使うと、Playwright が新しいブラウザを起動する代わりに、ユーザーが普段使っている Chrome に直接接続して操作できる。ログイン済みの状態や Chrome 拡張機能をそのまま使えるため、storageState の管理が不要になる。
+
+### Chrome 拡張のインストール
+
+[Midscene Chrome Extension](https://chromewebstore.google.com/detail/midscene/gbldofcpkknbggpkmbdaefngejllnief) を Chrome Web Store からインストールする。
+
+インストール後、拡張機能アイコンをクリックして Bridge Server が待機状態（ポート 3766）になっていることを確認する。
+
+### 動作確認
+
+```bash
+# Bridge Mode で実行
+taskp run web-agent --set bridge_mode=true
+```
+
+### 注意事項
+
+- 実行中は Chrome を手動で操作しない。AgentOverChromeBridge が自律的にタブを制御するため、同時操作すると予期しない動作になる
+- Chrome を開いたまま維持すること。Bridge Server は Chrome の拡張機能として動作しているため、Chrome を閉じると接続が切れる
+- 通常モード（Playwright）は引き続き利用できる。`bridge_mode=true` を指定しない限り、従来の動作で動くため、`npx playwright install chromium` は引き続き推奨
+
 ## Step 4: LLM の設定
 
 使用するモデルに応じて設定する。詳細は [MODEL-STRATEGY.md](./MODEL-STRATEGY.md) を参照。

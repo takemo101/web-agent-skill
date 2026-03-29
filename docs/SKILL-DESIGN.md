@@ -65,6 +65,10 @@ inputs:
     type: confirm
     message: "ヘッドレスモードで実行しますか？（Noで実際のブラウザが表示されます）"
     default: true
+  - name: bridge_mode
+    type: confirm
+    message: "Bridge Mode で実行しますか？（既存の Chrome を使います）"
+    default: false
 context:
   # --- 固定設定を読み込み ---
   - type: file
@@ -85,7 +89,8 @@ tools:
 ├── SKILL.md
 ├── config.json          ← 固定設定
 └── templates/
-    └── agent-runner.ts
+    ├── agent-runner.ts
+    └── bridge-runner.ts
 ```
 
 ```json
@@ -190,6 +195,14 @@ cp results/screenshots/*.png ~/Dropbox/evidence/
 | デフォルト | `true` |
 | 用途 | ブラウザの表示/非表示切替 |
 
+### bridge_mode
+
+| 項目 | 値 |
+|------|-----|
+| 型 | `confirm` |
+| デフォルト | `false` |
+| 用途 | 既存の Chrome を使う Bridge Mode 切替 |
+
 ### 実行パターン
 
 ```bash
@@ -204,6 +217,9 @@ taskp run web-agent --skip-prompt \
 
 # デバッグ: headed モードで実行
 taskp run web-agent --set headless=false
+
+# Bridge Mode で実行
+taskp run web-agent --set bridge_mode=true
 ```
 
 ## SKILL.md 本文設計
