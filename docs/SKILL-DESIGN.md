@@ -6,38 +6,12 @@
 |------|-----|
 | スキル名 | `web-agent` |
 | 配置先 | `.taskp/skills/web-agent/SKILL.md` |
-| 実行モード | `agent`（LLM が操作スクリプトを生成・実行） |
-| 使用ツール | `bash`, `read`, `write` |
+| 実行モード | `agent`（LLM が curl コマンドを発行して逐次操作） |
+| 使用ツール | `bash` のみ |
 
-## 設定の3層構造
+## SKILL.md の構成
 
-スキルの設定値は役割に応じて3つの場所に分離する。
-
-```
-┌─────────────────────────────────────────────────────┐
-│ 毎回変わるもの → inputs（TUI で入力）               │
-│   url, task, after_command                           │
-├─────────────────────────────────────────────────────┤
-│ 固定設定 → config.json（context で読み込み）         │
-│   screenshotDir, authDir, viewport, timeout,         │
-│   cdpEndpoint 等                                     │
-├─────────────────────────────────────────────────────┤
-│ 機密情報 → .env（環境変数）                          │
-│   APIキー等                                          │
-└─────────────────────────────────────────────────────┘
-```
-
-### なぜ分離するか
-
-| 設定値 | inputs | config.json | .env |
-|--------|:---:|:---:|:---:|
-| 毎回変わる（url, task） | ✅ | — | — |
-| プロジェクト固有の固定値 | — | ✅ | — |
-| 機密情報（APIキー） | — | — | ✅ |
-| git 管理 | ✅ | ✅ | ❌ |
-| cron で上書き | `--set` | — | 環境変数 |
-
-## フロントマター設計
+現在の SKILL.md は全56行のシンプルな構成。LLM がすべき手順を curl コマンド例とともに日本語で示す。
 
 ```yaml
 ---
@@ -45,7 +19,6 @@ name: web-agent
 description: 自然言語で指示した内容をAIがブラウザで自律操作する
 mode: agent
 inputs:
-  # --- 毎回入力するもの ---
   - name: url
     type: text
     message: "操作対象のURLは？"
@@ -53,32 +26,31 @@ inputs:
   - name: task
     type: textarea
     message: "やりたいことを自然言語で入力してください"
-  - name: after_command
-    type: text
-    message: "完了後に実行するコマンドは？（空欄でスキップ）"
-    required: false
-context:
-  # --- 固定設定を読み込み ---
-  - type: file
-    path: "{{__skill_dir__}}/config.json"
 tools:
   - bash
-  - read
-  - write
 ---
 ```
 
+### 設計上の選択
+
+- **`after_command` は削除** — REPL サーバー経由の逐次実行では必要なくなった。bash ツールで任意のコマンドを実行できる
+- **`read`・`write` ツールは削除** — curl だけで操作が完結するため不要
+- **`bash` のみ** — REPL サーバーへの curl 呼び出しが唯一の手段
+
+## 設定の2層構造
+
+```
+┌─────────────────────────────────────────────────────┐
+│ 毎回変わるもの → inputs（TUI で入力）               │
+│   url, task                                          │
+├─────────────────────────────────────────────────────┤
+│ 固定設定 → config.json                               │
+│   screenshotDir, authDir, viewport, timeout,         │
+│   cdpEndpoint, replPort, chromeProfileDir            │
+└─────────────────────────────────────────────────────┘
+```
+
 ## config.json 設計
-
-スキルディレクトリに配置する固定設定。`context` で SKILL.md に自動読み込みされ、LLM が参照する。
-
-```
-.taskp/skills/web-agent/
-├── SKILL.md
-├── config.json          ← 固定設定
-└── templates/
-    └── runner.ts
-```
 
 ```json
 {
@@ -86,6 +58,8 @@ tools:
   "authDir": "auth",
   "timeout": 30000,
   "cdpEndpoint": "http://localhost:9222",
+  "replPort": 3000,
+  "chromeProfileDir": "~/chrome-automation",
   "viewport": {
     "width": 1280,
     "height": 768
@@ -99,8 +73,10 @@ tools:
 |------|-----|-----------|------|
 | `screenshotDir` | string | `"results/screenshots"` | スクリーンショット保存先 |
 | `authDir` | string | `"auth"` | ログイン状態（storageState）の保存先 |
-| `timeout` | number | `30000` | 操作全体のタイムアウト（ms） |
+| `timeout` | number | `30000` | 操作ごとのデフォルトタイムアウト（ms） |
 | `cdpEndpoint` | string | `"http://localhost:9222"` | Chrome CDP 接続先 |
+| `replPort` | number | `3000` | REPL サーバーのポート番号 |
+| `chromeProfileDir` | string | `"~/chrome-automation"` | Chrome 起動用プロファイルの保存先 |
 | `viewport.width` | number | `1280` | ブラウザのビューポート幅 |
 | `viewport.height` | number | `768` | ブラウザのビューポート高さ |
 
@@ -110,15 +86,110 @@ tools:
 # スクショ保存先を変えたい
 → "screenshotDir": "~/Dropbox/evidence"
 
-# モバイルサイトをテストしたい
-→ "viewport": { "width": 375, "height": 812 }
-
 # 重いサイトでタイムアウトする
 → "timeout": 60000
 
-# CDPポートを変えた場合
+# CDP ポートを変えた場合
 → "cdpEndpoint": "http://localhost:9223"
+
+# REPL サーバーのポートを変えた場合
+→ "replPort": 3001
 ```
+
+## curl ベースのワークフロー
+
+LLM は bash ツールで curl コマンドを発行する。1操作ごとにレスポンスを確認してから次の操作を決める。
+
+### 基本パターン
+
+```bash
+# サーバー確認
+curl -s http://localhost:3000/health
+
+# ページ移動
+curl --json '{"action":"goto","args":{"url":"https://example.com"}}' \
+  'http://localhost:3000/exec?session=my-session'
+
+# ページ状態の確認
+curl --json '{"action":"observe"}' \
+  'http://localhost:3000/exec?session=my-session'
+
+# フィールド入力
+curl --json '{"action":"fillField","args":{"description":"メールアドレス","value":"user@example.com"}}' \
+  'http://localhost:3000/exec?session=my-session'
+
+# ボタンクリック
+curl --json '{"action":"clickButton","args":{"description":"ログイン"}}' \
+  'http://localhost:3000/exec?session=my-session'
+
+# スクリーンショット
+curl --json '{"action":"screenshot","args":{"path":"results/screenshots/final.png"}}' \
+  'http://localhost:3000/exec?session=my-session'
+
+# セッションを閉じてヒストリを保存
+curl --json '{"action":"close"}' \
+  'http://localhost:3000/exec?session=my-session'
+```
+
+### セッション ID の使い方
+
+`?session=xxx` の `xxx` は任意の文字列。SKILL.md では `{{url}}` をデフォルトのセッション ID として使う。
+
+```bash
+# URL をそのままセッション ID にする
+curl --json '...' 'http://localhost:3000/exec?session={{url}}'
+```
+
+同時に複数のセッションを持てる。セッションをまたいで操作が干渉することはない。
+
+### レスポンスの構造
+
+```json
+{
+  "ok": true,
+  "result": null,
+  "session": "my-session",
+  "state": {
+    "url": "https://example.com/dashboard",
+    "title": "ダッシュボード"
+  },
+  "meta": {
+    "durationMs": 412
+  }
+}
+```
+
+失敗した場合:
+
+```json
+{
+  "ok": false,
+  "error": {
+    "action": "clickButton",
+    "description": "送信する",
+    "failureType": "not_found",
+    "triedStrategies": ["role:button", "role:link", "text:button-like"],
+    "candidates": [],
+    "currentUrl": "https://example.com/form",
+    "pageTitle": "お問い合わせ",
+    "message": "clickButton(\"送信する\"): \"送信する\" に一致する要素なし"
+  },
+  "session": "my-session",
+  "state": { "url": "https://example.com/form", "title": "お問い合わせ" },
+  "meta": { "durationMs": 28 }
+}
+```
+
+### 失敗時の対応フロー
+
+```
+1. ok: false のレスポンスを受け取る
+2. observe で現在のページ状態を確認する
+3. observe の結果から正しい description を特定する
+4. description を修正して再試行する
+```
+
+スクリプトを書き直して再実行するのではなく、次の curl で即座に対応できる。
 
 ## 入力設計
 
@@ -128,7 +199,7 @@ tools:
 |------|-----|
 | 型 | `text` |
 | 必須 | はい |
-| バリデーション | `^https?://` — http/https で始まること |
+| バリデーション | `^https?://` |
 | 用途 | 操作対象ページの開始URL |
 
 ### task
@@ -140,344 +211,53 @@ tools:
 | 用途 | やりたいことを自然言語で記述 |
 
 入力例:
+
 ```
 テック系の注目記事トップ3のタイトルとURLを取得して、
 各記事ページのスクリーンショットを撮る
 ```
 
 ```
-管理画面にログインして、今月の売上データを取得する。
-ダッシュボードのスクショも撮っておく
+管理画面にログインして、今月の売上データをスクショする
 ```
 
-```
-投稿フォームに「本日のビルド完了しました」と入力して送信する
-```
+## SKILL.md 本文の手順設計
 
-### after_command
+SKILL.md の本文は LLM への指示書になる。現在の構成:
 
-| 項目 | 値 |
-|------|-----|
-| 型 | `text` |
-| 必須 | いいえ |
-| 用途 | 操作完了後に実行するシェルコマンド |
+### 1. サーバー確認
 
-入力例:
-```
-slack-notify.sh
-python analyze.py --data results/data.json
-echo "完了: $(date)" >> log/history.txt
-cp results/screenshots/*.png ~/Dropbox/evidence/
-```
+REPL サーバーが起動しているかを最初に確認する。未起動なら停止してユーザーに案内する。
 
-空欄の場合はコマンド実行をスキップする。
+### 2. ページ移動と observe
 
-### 実行パターン
+最初の goto の後に必ず observe を実行してページ状態を把握する。observe の結果でボタン・入力欄・リンクの正確な名前を確認してから操作に進む。
+
+### 3. 1操作ずつ実行
+
+各 curl のレスポンスを確認しながら進む。失敗（`ok: false`）が返ってきたら observe で現在の状態を確認してから再試行する。
+
+### 4. 完了
+
+最終スクリーンショットを撮ってから close でセッションを閉じる。close のレスポンスにスクリプトの保存パスが含まれる。
+
+## リプレイ
+
+close 時に `results/scripts/{session}.json` が保存される。このファイルを replay アクションで再実行できる。
 
 ```bash
-# 通常: TUI で url と task を入力、他はデフォルト
+curl --json '{"action":"replay","args":{"path":"results/scripts/my-session.json"}}' \
+  'http://localhost:3000/exec?session=replay-1'
+```
+
+## 実行パターン
+
+```bash
+# 通常: TUI で url と task を入力
 taskp run web-agent
 
 # cron / CI: 全部指定、対話なし
 taskp run web-agent --skip-prompt \
   --set url="https://example.com" \
-  --set task="記事をスクショ" \
-  --set after_command="slack-notify.sh"
-```
-
-## SKILL.md 本文設計
-
-### 1. 操作情報セクション
-
-```markdown
-## 操作対象
-
-- **URL**: {{url}}
-
-## やりたいこと
-
-{{task}}
-
-{{#if after_command}}
-## 完了後コマンド
-
-操作が完了したら以下のコマンドを実行してください:
-
-\`\`\`
-{{after_command}}
-\`\`\`
-{{/if}}
-```
-
-### 2. 実行手順セクション
-
-```markdown
-## 実行手順
-
-### Step 1: 操作スクリプトの生成
-
-`{{__skill_dir__}}/templates/runner.ts` を参考にして、上記の操作内容を agent ヘルパーAPIで実装したスクリプトを `{{__cwd__}}/.taskp-tmp/agent-run.ts` に生成してください。
-
-### Step 2: スクリプトの実行
-
-bash ツールで以下のコマンドを実行してください:
-
-\`\`\`
-bun run {{__cwd__}}/.taskp-tmp/agent-run.ts
-\`\`\`
-
-**失敗時のリペアループ:**
-
-スクリプトが失敗した場合:
-1. `results/error-report.json` を `read` ツールで読む
-2. `results/screenshots/error.png` を確認する
-3. エラーレポートの `failureType` に応じて:
-   - `not_found`: description を変更（ページ上の実際のラベルに合わせる）
-   - `ambiguous`: `agent.section()` でスコープを絞る
-   - `not_actionable`: `agent.waitForVisible()` を追加するか、エスケープハッチを使う
-   - `timeout`: タイムアウト値を増やすか、待機条件を変更する
-4. スクリプトを修正して再実行（**最大1回のリトライ**）
-5. 2回目も失敗した場合はエラーを報告して停止する
-
-### Step 3: 完了後コマンドの実行
-
-スクリプトが正常終了した場合、after_command が指定されていれば実行してください。
-スクリプトの stdout に出力されたデータは、完了後コマンドにパイプで渡せます。
-
-### Step 4: 結果の報告
-
-以下を報告してください:
-- 実行した操作の概要
-- 保存されたスクリーンショットのパス
-- 完了後コマンドの実行結果（該当する場合）
-```
-
-### 3. Agent API リファレンスセクション
-
-```markdown
-## Agent API リファレンス
-
-`createAgent(page)` で作成した agent を使ってスクリプトを生成してください。
-**生のCSSセレクタやXPathは使わないでください。** agent が内部で最適な要素を自動検出します。
-
-詳細なAPIリファレンスは [docs/PLAYWRIGHT-CDP.md](../docs/PLAYWRIGHT-CDP.md) を参照してください。
-```
-
-## テンプレート設計
-
-`runner.ts` — CDPで接続し、agentヘルパーを使う標準テンプレート。
-
-```
-.taskp/skills/web-agent/templates/
-└── runner.ts    ← 唯一のテンプレート
-```
-
-テンプレートの構造:
-
-```typescript
-import { mkdirSync, writeFileSync } from "fs";
-import { chromium } from "playwright";
-import { createAgent } from "../src/helpers/index.ts";
-
-const TARGET_URL = "{{TARGET_URL}}";
-const CDP_ENDPOINT = "{{CDP_ENDPOINT}}";
-const SCREENSHOT_DIR = "{{SCREENSHOT_DIR}}";
-const TIMEOUT = {{TIMEOUT}};
-
-mkdirSync(SCREENSHOT_DIR, { recursive: true });
-
-const browser = await chromium.connectOverCDP(CDP_ENDPOINT);
-const context = browser.contexts()[0];
-const page = await context.newPage();
-
-await page.goto(TARGET_URL, { timeout: TIMEOUT, waitUntil: "domcontentloaded" });
-
-const agent = createAgent(page);
-
-let exitCode = 0;
-try {
-  // === LLMが生成するコード ===
-
-  await agent.screenshot(`${SCREENSHOT_DIR}/final.png`);
-  console.log("✅ 操作完了");
-} catch (error) {
-  try {
-    await agent.screenshot(`${SCREENSHOT_DIR}/error.png`);
-  } catch {}
-
-  if (error && typeof (error as any).toJSON === "function") {
-    const report = {
-      ...(error as any).toJSON(),
-      screenshot: `${SCREENSHOT_DIR}/error.png`,
-      url: page.url(),
-    };
-    writeFileSync("results/error-report.json", JSON.stringify(report, null, 2));
-    console.error("❌ 操作失敗（error-report.json に詳細を出力）:", (error as Error).message);
-  } else {
-    console.error("❌ 操作失敗:", (error as Error).message);
-  }
-  exitCode = 1;
-} finally {
-  await page.close();
-  browser.disconnect();
-  process.exit(exitCode);
-}
-```
-
-**テンプレートの重要なポイント:**
-
-- `browser.disconnect()` — ユーザーのChromeを閉じない（`browser.close()` は使わない）
-- `page.close()` — 開いたタブだけ閉じる
-- `context.newPage()` — 常に新しいタブを開く（既存タブをハイジャックしない）
-- `error-report.json` — リペアループ用の構造化エラー出力
-
-## スクリプト生成時のルール
-
-Agent がスクリプトを生成する際、以下を守ること:
-
-1. **スクリーンショットは `results/screenshots/` に保存**する
-2. **最終状態のスクリーンショットは必ず撮る**（成功・失敗どちらでも）
-3. **抽出データは `console.log` で stdout に出力**する（JSON 推奨）
-4. **完了後コマンドが指定されている場合は操作完了後に bash で実行**する
-5. **ディレクトリは `mkdirSync` で事前作成**する
-6. **生のCSSセレクタやXPathは使わない** — agent ヘルパーAPIを使う
-
-## ターミナル出力フォーマット
-
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✅ 操作完了
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-URL:    https://news.example.com
-操作:   テック系注目記事トップ3を取得
-
-実行内容:
-  1. ✅ トップページ表示         (2.1s)
-  2. ✅ テックカテゴリに移動     (1.5s)
-  3. ✅ 記事3件のスクショ撮影    (4.2s)
-
-📸 スクリーンショット:
-   results/screenshots/article-1.png
-   results/screenshots/article-2.png
-   results/screenshots/article-3.png
-   results/screenshots/final.png
-
-🔧 完了後コマンド実行: slack-notify.sh
-   → 正常終了 (exit 0)
-```
-
-## マルチアクション版（v2）
-
-```yaml
-actions:
-  run:
-    description: ブラウザ操作を実行する
-    inputs:
-      - name: url
-        type: text
-        message: "操作対象のURL"
-      - name: task
-        type: textarea
-        message: "やりたいこと"
-      - name: after_command
-        type: text
-        message: "完了後コマンド（空欄可）"
-        required: false
-  login:
-    description: サイトにログインしてセッションを保存する
-    mode: agent
-    inputs:
-      - name: url
-        type: text
-        message: "ログインページのURL"
-      - name: site_name
-        type: text
-        message: "サイト名（保存用）"
-  report:
-    description: 最新のレポートをブラウザで開く
-    mode: template
-  screenshot:
-    description: 最新のスクリーンショットを開く
-    mode: template
-```
-
-### action:login
-
-headed モードでブラウザを開き、ユーザーが手動でログイン → Cookie を保存。
-
-```typescript
-// headed モードで起動（ユーザーが操作する）
-const browser = await chromium.launch({ headless: false });
-const context = await browser.newContext();
-const page = await context.newPage();
-await page.goto(url);
-
-console.log("ブラウザでログインしてください...");
-console.log("ログイン完了後、ターミナルで Enter を押してください");
-
-// ユーザーの入力を待つ
-await new Promise((resolve) => process.stdin.once("data", resolve));
-
-// セッション保存
-await context.storageState({ path: `auth/${siteName}.json` });
-console.log(`✅ セッション保存: auth/${siteName}.json`);
-```
-
-## 実行例
-
-### コマンド
-
-```bash
-taskp run web-agent
-```
-
-### TUI での入力
-
-```
-? 操作対象のURLは？
-> https://news.ycombinator.com
-
-? やりたいことを自然言語で入力してください
-> トップページの記事タイトルとポイント数を上位5件取得して、
-> 各記事のスクリーンショットを撮る
-> [Meta+Enter で確定]
-
-? 完了後に実行するコマンドは？（空欄でスキップ）
-> echo "$(cat results/data/articles.json)" | jq .
-```
-
-### 出力
-
-```
-🔄 操作スクリプトを生成中...
-📝 .taskp-tmp/agent-run.ts に書き出しました
-🚀 実行中...
-
-✅ 操作完了
-
-📸 スクリーンショット:
-   results/screenshots/article-1.png
-   results/screenshots/article-2.png
-   results/screenshots/article-3.png
-   results/screenshots/article-4.png
-   results/screenshots/article-5.png
-   results/screenshots/final.png
-
-🔧 完了後コマンド実行:
-[
-  {"title": "Show HN: ...", "points": 342},
-  {"title": "Ask HN: ...", "points": 285},
-  ...
-]
-```
-
-### 定期実行（cron）
-
-```bash
-# 毎朝9時に記事チェック
-0 9 * * * cd /path/to/project && taskp run web-agent --skip-prompt \
-  --set url="https://news.ycombinator.com" \
-  --set task="トップ5記事のタイトルとURLを取得してスクショ" \
-  --set after_command="slack-notify.sh"
+  --set task="記事をスクショ"
 ```

@@ -1,4 +1,4 @@
-# SETUP — セットアップ手順（web-agent-skill）
+# SETUP — セットアップ手順
 
 ## 前提条件
 
@@ -13,11 +13,12 @@
 
 | 用途 | ツール | バージョン |
 |------|--------|-----------|
-| ランタイム | Bun | >= 1.2.0 |
+| Chrome 起動 | Bun + src/chrome.ts | — |
+| REPL サーバー | npx tsx | 4.21.0 |
+| ブラウザ接続 | Playwright CDP | 1.58.2 |
 | lint + format | Biome | 2.4.9 |
 | 型チェック | TypeScript | 6.0.2 |
 | テスト | Vitest | 4.1.2 |
-| ブラウザ接続 | Playwright CDP | 1.58.2 |
 
 ## Step 1: taskp のインストール
 
@@ -29,51 +30,78 @@ bun install -g github:takemo101/taskp
 taskp --version
 ```
 
-## Step 2: プロジェクトセットアップ
+## Step 2: 依存のインストール
 
 ```bash
 cd /path/to/web-agent-skill
 
-# taskp の初期化
-taskp setup
-
-# 依存のインストール
+# npm パッケージ（Playwright 含む）をインストール
 bun install
+
+# Playwright 用の Chromium をダウンロード（内部テスト用）
+bun run setup
 ```
 
-## Step 3: Chrome を CDP モードで起動
+`bun run setup` は `npx playwright install chromium` を実行する。REPL サーバーが Chrome に CDP 接続するために Playwright のパッケージが必要だが、実際のブラウザにはユーザーの Chrome を使う。
 
-CDP（Chrome DevTools Protocol）経由で既存のChromeに接続する。これにより、ログイン済みのセッション・Cookie・Chrome拡張機能をそのまま利用できる。
-
-### macOS
+## Step 3: Chrome を起動する
 
 ```bash
-/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222
+# ターミナル1
+bun run chrome
 ```
 
-### Linux
+このコマンドが自動的に以下を行う:
+
+1. `~/chrome-automation` が存在しなければ、現在の Chrome プロファイルをコピー
+2. `--remote-debugging-port=9222 --user-data-dir=~/chrome-automation` で Chrome を起動
+
+### Chrome 136+ について
+
+Chrome 136 以降、デフォルトプロファイルに `--remote-debugging-port` を付けて起動することが制限された。`bun run chrome` はプロファイルをコピーして別のディレクトリから起動することでこれを回避する。
+
+コピーされるのは初回のみ。2回目以降は `~/chrome-automation` がそのまま使われる。
+
+### 起動確認
 
 ```bash
-google-chrome --remote-debugging-port=9222
-```
-
-### 接続確認
-
-```bash
-# CDPエンドポイントが応答するか確認
 curl http://localhost:9222/json/version
-# → {"Browser":"Chrome/...","WebKit-Version":"..."} が返れば OK
+# → {"Browser":"Chrome/...","Protocol-Version":"..."} が返れば OK
 ```
 
 ### 注意事項
 
-- すでにChromeが起動している場合は、一度すべてのウィンドウを閉じてから上記コマンドで起動する
-- `--remote-debugging-port=9222` はデフォルト設定。`config.json` の `cdpEndpoint` と合わせること
-- Chromeを閉じると接続が切れる。自動化実行中はChromeを維持しておく
+- Chrome が既に起動していても問題ない。`bun run chrome` は新しいプロセスを起動する
+- `~/chrome-automation` のプロファイルは最初のコピー時点のものなので、その後のログイン状態とは別になる
+- CDP 接続ポートのデフォルトは 9222。変更する場合は `config.json` の `cdpEndpoint` も合わせる
 
-## Step 4: LLM の設定
+## Step 4: REPL サーバーを起動する
 
-使用するモデルに応じて設定する。スクリプト生成用のLLM（第1層）のみ設定すればよい。
+```bash
+# ターミナル2（Chrome とは別のターミナル）
+npm run repl
+```
+
+`npm run repl` は内部で `npx tsx src/repl-server.ts` を実行する。起動すると以下が表示される:
+
+```
+{"ok":true,"port":3000}
+```
+
+### 起動確認
+
+```bash
+curl http://localhost:3000/health
+# → {"ok":true,"sessions":[]} が返れば OK
+```
+
+### Bun ではなく npx tsx を使う理由
+
+Playwright の CDP 接続は WebSocket を使う。Bun の WebSocket 実装と Playwright の相性問題があり、`bun run` では動作しない。REPL サーバーは `npx tsx` で実行する必要がある。
+
+## Step 5: LLM の設定
+
+使用するモデルを `.taskp/config.toml` で設定する。
 
 ### パターン A: 完全ローカル（無料）
 
@@ -89,34 +117,18 @@ curl -fsSL https://ollama.com/install.sh | sh
 
 #### 2. モデルのダウンロード
 
-スクリプト生成用のテキストモデルだけあればよい。
-
 ```bash
-# スクリプト生成用（テキストモデル）
+# テキスト生成モデル（推奨）
 ollama pull qwen2.5-coder:7b    # ~4.7GB
 ```
-
-##### モデルの選択肢
 
 | モデル | サイズ | 品質 | 速度 |
 |--------|--------|:---:|:---:|
 | `qwen2.5-coder:7b`（推奨） | 4.7GB | ○ | ◎ |
 | `qwen2.5-coder:14b` | 9GB | ◎ | ○ |
 | `deepseek-coder-v2:16b` | 9GB | ◎ | ○ |
-| `codellama:7b` | 3.8GB | △ | ◎ |
 
-#### 3. Ollama の起動確認
-
-```bash
-# 起動（バックグラウンド or 別ターミナル）
-ollama serve
-
-# 動作確認
-curl http://localhost:11434/api/tags
-# → ダウンロード済みモデル一覧が表示される
-```
-
-#### 4. taskp Agent の設定
+#### 3. taskp Agent の設定
 
 ```toml
 # .taskp/config.toml
@@ -125,39 +137,15 @@ default_provider = "ollama"
 default_model = "qwen2.5-coder:7b"
 
 [ai.providers.ollama]
-base_url = "http://localhost:11434/v1"  # /v1 が必要（OpenAI互換エンドポイント）
+base_url = "http://localhost:11434/v1"
 ```
-
-#### 5. ローカル動作確認
-
-```bash
-# テキスト生成の確認
-ollama run qwen2.5-coder:7b "console.log('hello') の TypeScript コードを書いて"
-
-# 全体の確認
-taskp run web-agent
-```
-
-#### ハードウェア要件
-
-| 項目 | 最低 | 推奨 |
-|------|------|------|
-| RAM | 8GB | 16GB |
-| VRAM（GPU） | 4GB | 6GB+ |
-| ストレージ | 5GB 空き | 10GB 空き |
-
-- **Apple Silicon Mac**: Metal で高速に動作（M1 以降推奨）
-- **NVIDIA GPU**: CUDA で高速（RTX 3060 以上推奨）
-- **CPU のみ**: 動作するが遅い（1スクリプト生成に 10〜30秒）
 
 ### パターン B: クラウド API
 
 ```bash
-# .env に APIキーを設定
+# .env
 ANTHROPIC_API_KEY=sk-ant-...
 ```
-
-taskp の設定:
 
 ```toml
 # .taskp/config.toml
@@ -169,7 +157,25 @@ default_model = "claude-sonnet-4-20250514"
 api_key_env = "ANTHROPIC_API_KEY"
 ```
 
-## Step 5: コード品質チェック
+## Step 6: 動作確認
+
+3つのターミナルがすべて起動していることを確認してから実行する。
+
+```bash
+# ターミナル3
+taskp run web-agent
+```
+
+入力例:
+
+```
+URL: https://example.com
+やりたいこと: ページのタイトルをスクショして保存する
+```
+
+`results/screenshots/` にスクリーンショットが生成されれば成功。
+
+## コード品質チェック
 
 ```bash
 # lint + format チェック
@@ -188,111 +194,73 @@ bun run test
 bun run verify
 ```
 
-## Step 6: 動作確認
-
-```bash
-# スキル一覧に web-agent が表示されることを確認
-taskp list
-
-# 実行（example.com で簡易テスト）
-taskp run web-agent
-```
-
-入力例:
-```
-URL: https://example.com
-やりたいこと: ページのタイトルと本文の内容を取得してスクショを撮る
-完了後コマンド: （空欄）
-```
-
-成功すれば `results/screenshots/` にスクリーンショットが生成される。
-
 ## トラブルシューティング
 
 ### Chrome に接続できない
 
 ```bash
-# CDPエンドポイントの応答確認
+# CDP エンドポイントの応答確認
 curl http://localhost:9222/json/version
-
-# 応答しない場合: Chromeを閉じて CDP モードで再起動
-# macOS:
-/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222
 ```
 
-すでに通常モードでChromeが起動している場合、そのプロセスにはCDPが有効になっていない。一度すべてのChromeウィンドウを閉じること。
+応答しない場合は `bun run chrome` を再実行する。
+
+### REPL サーバーが起動しない
+
+```bash
+# ポート 3000 が使われていないか確認
+lsof -i :3000
+
+# 使われていれば既存プロセスを終了
+kill -9 <PID>
+
+# 再起動
+npm run repl
+```
+
+REPL サーバーは起動時に既存の `/shutdown` エンドポイントを呼んで自動的に終了させる。手動で終了させる必要はないことが多い。
+
+### 要素が見つからない（not_found エラー）
+
+REPL サーバーのレスポンスに `failureType` と `triedStrategies` が含まれる。先に `observe` アクションで正しい要素名を確認する。
+
+```bash
+curl --json '{"action":"observe"}' 'http://localhost:3000/exec?session=debug'
+```
+
+返ってきた `buttons`・`inputs`・`links` の中から正確なラベルを使う。
 
 ### Ollama に接続できない
 
 ```bash
-# Ollama が起動しているか確認
+# 起動確認
 curl http://localhost:11434/api/tags
 
 # 起動していなければ
 ollama serve
 ```
 
-Docker 内から Ollama に接続する場合:
-
-```bash
-# localhost ではなく host.docker.internal を使う
-# .taskp/config.toml の base_url を変更:
-base_url = "http://host.docker.internal:11434/v1"
-```
-
-### taskp Agent がスクリプト生成に失敗する
-
-ローカルLLM の品質が不足している可能性。以下を試す:
-
-```bash
-# 1. より大きなモデルに切り替え
-ollama pull qwen2.5-coder:14b
-# → .taskp/config.toml の default_model を変更
-
-# 2. 一時的にクラウドモデルを使用
-taskp run web-agent --model anthropic/claude-sonnet-4-20250514
-
-# 3. Ollama のコンテキストウィンドウを拡大
-# Modelfile を作成:
-#   FROM qwen2.5-coder:7b
-#   PARAMETER num_ctx 32768
-# → ollama create qwen2.5-coder-32k -f Modelfile
-```
-
-### 要素が見つからない（not_found エラー）
-
-```bash
-# results/error-report.json を確認
-cat results/error-report.json
-
-# error.png でスクリーンショットを確認
-open results/screenshots/error.png
-```
-
-`error-report.json` の `failureType` と `candidates` を見て、descriptionをページ上の実際のラベルに合わせて修正する。
-
 ## ディレクトリ構成（セットアップ完了後）
 
 ```
 web-agent-skill/
 ├── .taskp/
-│   ├── config.toml                     # ✅ taskp 設定
+│   ├── config.toml                     # taskp 設定
 │   └── skills/
 │       └── web-agent/
-│           ├── SKILL.md                # ✅ スキル定義
-│           ├── config.json             # ✅ 固定設定
-│           └── templates/
-│               └── runner.ts           # ✅ テンプレート
+│           ├── SKILL.md                # スキル定義
+│           └── config.json             # 固定設定
 ├── src/
-│   └── helpers/                        # ✅ ヘルパーAPI
+│   ├── repl-server.ts                  # REPL HTTP サーバー
+│   ├── chrome.ts                       # Chrome 起動スクリプト
+│   ├── login.ts                        # ログイン状態保存
+│   └── helpers/                        # ヘルパーAPI
 ├── auth/                               # ログイン状態の保存先
-├── results/                            # 操作結果
-│   └── screenshots/                    # スクリーンショット
-├── docs/                               # 設計ドキュメント
-├── .env                                # ✅ 環境変数
-├── .env.example                        # 環境変数テンプレート
-├── package.json                        # ✅ 依存定義
-├── biome.json                          # ✅ Biome 設定
-├── tsconfig.json                       # ✅ TypeScript 設定
-└── .gitignore
+├── results/
+│   ├── screenshots/                    # スクリーンショット
+│   └── scripts/                        # セッション別ヒストリ
+├── docs/
+├── .env                                # 環境変数
+├── package.json
+└── tsconfig.json
 ```
