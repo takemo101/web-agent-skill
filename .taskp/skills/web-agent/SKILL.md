@@ -72,6 +72,8 @@ const TIMEOUT = 30000;
 
 > 上記は config.json のデフォルト値です。config.json に異なる値がある場合はそちらを使ってください。
 
+**重要: CDP接続は必須です。** スクリプトは必ず `chromium.connectOverCDP()` を使って既存のChromeに接続してください。CDP接続エラーが発生した場合は、ユーザーに「Chromeを `--remote-debugging-port=9222` で起動してください」と案内して停止してください。`chromium.launch()` への切り替えや storageState によるフォールバックは**絶対にしないでください**。
+
 **スクリプト生成ルール:**
 
 - `createAgent(page)` で agent を作り、`agent.xxx()` でDOM操作する

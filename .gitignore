@@ -1,5 +1,4 @@
 node_modules/
-midscene_run/
 .taskp-tmp/
 .env
 *.log
@@ -8,5 +7,5 @@ dist/
 # 認証ファイル（Cookie/LocalStorage）をgit管理しない
 auth/*.json
 
-# スクリーンショットをgit管理しない場合はコメント解除
-results/screenshots/
+# 実行結果をgit管理しない
+results/
