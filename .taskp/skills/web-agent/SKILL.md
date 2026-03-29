@@ -23,283 +23,375 @@ tools:
   - write
 ---
 
-# Web Agent — ブラウザ自律操作
-
 ## 操作対象
 
-- **URL**: {{url}}
+URL: {{url}}
 
 ## やりたいこと
 
 {{task}}
 
-{{#if after_command}}
+{% if after_command %}
 ## 完了後コマンド
 
-操作が完了したら以下のコマンドを実行してください:
+全操作が完了したら、最後に以下のコマンドを実行してください:
 
-```
+```bash
 {{after_command}}
 ```
-{{/if}}
+{% endif %}
 
 ## 実行手順
 
-### Step 1: 操作スクリプトの生成
+### Step 1: REPLサーバーの起動
 
-まず `bash` ツールで出力先ディレクトリを作成してください:
-
-```bash
-mkdir -p {{__cwd__}}/.taskp-tmp
-```
-
-次に、`read` ツールでテンプレートを読み込んでください:
-
-```
-{{__skill_dir__}}/templates/runner.ts
-```
-
-テンプレートを参考に、以下の設定値を埋め込んだスクリプトを `{{__cwd__}}/.taskp-tmp/agent-run.ts` に `write` ツールで生成してください。
-
-**スクリプト冒頭で以下の定数を必ず設定すること（テンプレート内の二重波括弧を以下の値に置き換える）:**
-
-```typescript
-const TARGET_URL = "{{url}}";
-const CDP_ENDPOINT = process.env.CDP_ENDPOINT || "http://localhost:9222";
-const SCREENSHOT_DIR = "results/screenshots";
-const TIMEOUT = 30000;
-```
-
-> 上記は config.json のデフォルト値です。config.json に異なる値がある場合はそちらを使ってください。
-
-**重要: CDP接続は必須です。** スクリプトは必ず `chromium.connectOverCDP()` を使って既存のChromeに接続してください。CDP接続エラーが発生した場合は、ユーザーに「Chromeを `--remote-debugging-port=9222` で起動してください」と案内して停止してください。`chromium.launch()` への切り替えや storageState によるフォールバックは**絶対にしないでください**。
-
-**スクリプト生成ルール:**
-
-- `createAgent(page)` で agent を作り、`agent.xxx()` でDOM操作する
-- 生のCSSセレクタやXPathは使わない（agent が内部で自動検出する）
-- 抽出データは `console.log` で JSON 出力する
-- `npx tsx` で実行する（`bun run` ではない）
-- import パスは `../src/helpers/index.ts`（`.taskp-tmp/agent-run.ts` からの相対パス）
-- `finally` ブロックで `page.close()` → `browser.close()` → `process.exit(exitCode)` を必ず呼ぶ
-- `waitForNavigation` は使わない。代わりに `waitForUrl` または `waitForText` を使う
-
-### Step 2: スクリプトの実行
-
-`bash` ツールで以下のコマンドを実行してください:
+bash ツールでサーバーをバックグラウンド起動し、準備できているか確認する:
 
 ```bash
-npx tsx {{__cwd__}}/.taskp-tmp/agent-run.ts
+npx tsx {{__cwd__}}/src/repl-server.ts &
+sleep 3
+curl -s http://localhost:3000/health
 ```
 
-> `bun run` ではなく `npx tsx` を使うこと（BunのWebSocket実装がCDP接続と非互換のため）
+`{"ok":true}` が返ればサーバー準備完了。エラーが返った場合、またはChromeが起動していない場合は次を実行してから再試行:
 
-**失敗時のリペアループ:**
+```bash
+bun run chrome
+```
 
-スクリプトが失敗した場合:
+### Step 2: ページ移動と観察
 
-1. `read` ツールで `results/error-report.json` を読む
-2. エラーレポートの `failureType` に応じてスクリプトを修正する:
-   - `not_found`: `description` を変更（ページ上の実際のラベルに合わせる）
-   - `ambiguous`: `agent.section()` でスコープを絞る
-   - `not_actionable`: `agent.waitForVisible()` を追加するか、エスケープハッチを使う
-   - `timeout`: タイムアウト値を増やすか、待機条件を変更する
-3. 修正したスクリプトを再実行する（**最大1回のリトライ**）
-4. 2回目も失敗した場合はエラーを報告して停止する
+まずページに移動し、何があるかを確認する:
 
-### Step 3: 完了後コマンドの実行
+```bash
+curl --json '{"action":"goto","args":{"url":"操作対象のURL"}}' http://localhost:3000/exec
+curl --json '{"action":"observe"}' http://localhost:3000/exec
+```
 
-スクリプトが正常終了した場合、`after_command` が指定されていれば `bash` ツールで実行してください。スクリプトの stdout に出力されたデータは、完了後コマンドにパイプで渡せます。
+observe の結果にはボタン・リンク・入力欄・見出しの一覧が含まれる。これを見てから操作を開始すること。
 
-### Step 4: 結果の報告
+### Step 3: 操作実行（ループ）
 
-以下を報告してください:
+**1操作ずつ curl で実行する。結果の `ok` を確認してから次を決める。スクリプトファイルを生成しないこと。**
 
-- 実行した操作の概要
-- 保存されたスクリーンショットのパス
-- 抽出データの内容（該当する場合）
-- 完了後コマンドの実行結果（該当する場合）
+操作例:
+
+```bash
+# テキスト入力
+curl --json '{"action":"fillField","args":{"description":"検索欄","value":"キーワード"}}' http://localhost:3000/exec
+
+# ボタンクリック
+curl --json '{"action":"clickButton","args":{"description":"検索"}}' http://localhost:3000/exec
+
+# スクリーンショット
+curl --json '{"action":"screenshot","args":{"path":"results/screenshots/step1.png"}}' http://localhost:3000/exec
+```
+
+**失敗時の対応:**
+
+- `not_found` → description を変えて再試行。必要なら `observe` で要素名を確認する
+- `ambiguous` → `section` で範囲を絞ってから再試行
+- `timeout` → `waitForVisible` を先に実行してから再試行
+- 3回失敗したら `observe` で改めてページ状態を確認し、アプローチを変える
+
+### Step 4: 完了
+
+操作が終わったら最終スクリーンショットを撮り、サーバーを停止する:
+
+```bash
+curl --json '{"action":"screenshot","args":{"path":"results/screenshots/final.png"}}' http://localhost:3000/exec
+curl --json '{"action":"shutdown"}' http://localhost:3000/exec
+```
+
+---
 
 ## スキル設定
 
-config.json の内容が context で自動挿入されています。スクリプト生成時にこれらの設定値を使用してください。
+config.json の内容:
 
-| キー | 説明 |
-|------|------|
-| `screenshotDir` | スクリーンショット保存先 |
-| `authDir` | ログイン状態（storageState）の保存先 |
-| `timeout` | 操作全体のタイムアウト（ms） |
-| `cdpEndpoint` | Chrome CDP接続先（例: `http://localhost:9222`） |
-| `viewport.width` / `viewport.height` | ブラウザのビューポートサイズ |
+| キー | 説明 | デフォルト |
+|------|------|-----------|
+| `cdpEndpoint` | CDP接続先 | `http://localhost:9222` |
+| `replPort` | REPLサーバーのポート | `3000` |
+| `timeout` | アクションのタイムアウト（ms） | `30000` |
+| `screenshotDir` | スクリーンショット保存先 | `results/screenshots` |
+| `viewport.width` | ブラウザ幅 | `1280` |
+| `viewport.height` | ブラウザ高さ | `768` |
 
-## Agent API リファレンス
+---
 
-`createAgent(page)` で作成した agent を使ってスクリプトを生成してください。**生のCSSセレクタやXPathは使わないでください。** agent が内部で最適な要素を自動検出します。
+## アクション一覧
 
-### アクション
+すべてのアクションは `POST /exec` に `{"action":"...", "args":{...}}` の形式で送る。
 
-| API | 用途 | 例 |
-|-----|------|-----|
-| `agent.clickButton(description)` | ボタンをクリック | `agent.clickButton('投稿')` |
-| `agent.clickLink(description)` | リンクをクリック | `agent.clickLink('次のページ')` |
-| `agent.click(description)` | 汎用クリック（タブ、メニュー、カード等） | `agent.click('メニューアイコン')` |
-| `agent.fillField(description, value)` | テキスト入力 | `agent.fillField('検索欄', 'キーワード')` |
-| `agent.selectOption(description, value)` | 選択 | `agent.selectOption('国', '日本')` |
-| `agent.check(description)` | チェックボックスをオン | `agent.check('利用規約に同意')` |
-| `agent.uncheck(description)` | チェックボックスをオフ | `agent.uncheck('メール通知')` |
+### ナビゲーション
+
+| action | args | 例 |
+|--------|------|-----|
+| `goto` | `{ url }` | `curl --json '{"action":"goto","args":{"url":"https://example.com"}}' http://localhost:3000/exec` |
+
+レスポンス例:
+```json
+{"ok":true,"result":null,"state":{"url":"https://example.com","title":"Example"},"meta":{"durationMs":312}}
+```
+
+### 操作
+
+| action | args | 説明 |
+|--------|------|------|
+| `clickButton` | `{ description }` | ボタンをクリック |
+| `clickLink` | `{ description }` | リンクをクリック |
+| `click` | `{ description }` | 汎用クリック（ボタン・リンク以外も対象） |
+| `fillField` | `{ description, value }` | テキスト入力欄に値を入力 |
+| `selectOption` | `{ description, value }` | ドロップダウンで値を選択 |
+| `check` | `{ description }` | チェックボックスをONにする |
+| `uncheck` | `{ description }` | チェックボックスをOFFにする |
+
+例:
+```bash
+curl --json '{"action":"clickButton","args":{"description":"送信"}}' http://localhost:3000/exec
+curl --json '{"action":"fillField","args":{"description":"メールアドレス","value":"user@example.com"}}' http://localhost:3000/exec
+curl --json '{"action":"selectOption","args":{"description":"カテゴリ","value":"技術"}}' http://localhost:3000/exec
+```
 
 ### 待機
 
-| API | 用途 | 例 |
-|-----|------|-----|
-| `agent.waitForText(text)` | テキスト出現を待機 | `agent.waitForText('投稿完了')` |
-| `agent.waitForUrl(pattern)` | URL変更を待機 | `agent.waitForUrl('/dashboard')` |
-| `agent.waitForVisible(description)` | 要素の表示を待機 | `agent.waitForVisible('検索結果')` |
-| `agent.waitForHidden(description)` | 要素の非表示を待機 | `agent.waitForHidden('ローディング')` |
+| action | args | 説明 |
+|--------|------|------|
+| `waitForText` | `{ text, timeoutMs? }` | 指定テキストが画面に出るまで待つ |
+| `waitForUrl` | `{ pattern, timeoutMs? }` | URLが変わるまで待つ |
+| `waitForVisible` | `{ description, timeoutMs? }` | 要素が表示されるまで待つ |
+| `waitForHidden` | `{ description, timeoutMs? }` | 要素が消えるまで待つ |
+
+例:
+```bash
+curl --json '{"action":"waitForText","args":{"text":"投稿完了"}}' http://localhost:3000/exec
+curl --json '{"action":"waitForUrl","args":{"pattern":"/dashboard"}}' http://localhost:3000/exec
+curl --json '{"action":"waitForVisible","args":{"description":"送信ボタン","timeoutMs":5000}}' http://localhost:3000/exec
+```
 
 ### 検証
 
-| API | 用途 | 例 |
-|-----|------|-----|
-| `agent.assertVisible(description)` | 要素が表示されているか | `agent.assertVisible('ログアウト')` |
-| `agent.assertText(description, expected)` | テキスト一致を検証 | `agent.assertText('価格', '¥1,000')` |
+| action | args | 説明 |
+|--------|------|------|
+| `assertVisible` | `{ description }` | 要素が表示されているか確認 |
+| `assertText` | `{ description, expected }` | 要素のテキストが一致するか確認 |
 
-### データ抽出
+例:
+```bash
+curl --json '{"action":"assertVisible","args":{"description":"成功メッセージ"}}' http://localhost:3000/exec
+curl --json '{"action":"assertText","args":{"description":"ステータス","expected":"公開済み"}}' http://localhost:3000/exec
+```
 
-| API | 用途 | 例 |
-|-----|------|-----|
-| `agent.extractText(description)` | テキスト取得 | `agent.extractText('商品名')` |
-| `agent.extractTexts(description)` | 複数テキスト取得 | `agent.extractTexts('記事タイトル')` |
-| `agent.extractAttribute(description, attr)` | 属性取得 | `agent.extractAttribute('プロフィール画像', 'src')` |
+### テキスト取得
 
-### スコーピング（同名要素が複数ある場合）
+| action | args | 説明 |
+|--------|------|------|
+| `extractText` | `{ description }` | 要素のテキストを1件取得 |
+| `extractTexts` | `{ description }` | 複数要素のテキストをリストで取得 |
+| `extractAttribute` | `{ description, attribute }` | 要素の属性値を取得 |
 
-| API | 用途 | 例 |
-|-----|------|-----|
-| `agent.section(description)` | セクション内に限定した新 agent を返す | `const sidebar = await agent.section('サイドバー')` |
+例:
+```bash
+curl --json '{"action":"extractText","args":{"description":"エラーメッセージ"}}' http://localhost:3000/exec
+curl --json '{"action":"extractTexts","args":{"description":"検索結果の件名"}}' http://localhost:3000/exec
+curl --json '{"action":"extractAttribute","args":{"description":"プロフィール画像","attribute":"src"}}' http://localhost:3000/exec
+```
 
-### スクリーンショット
+レスポンス例（extractTexts）:
+```json
+{"ok":true,"result":["件名A","件名B","件名C"],"state":{"url":"https://example.com/results","title":"検索結果"},"meta":{"durationMs":89}}
+```
 
-| API | 用途 |
-|-----|------|
-| `agent.screenshot(path)` | スクリーンショットを保存 |
+### スコーピング
 
-### エスケープハッチ（最終手段のみ）
+特定のセクション内だけで操作したい場合に使う。同じ名前のボタンが複数ある時に特に有効。
 
-| API | 用途 |
-|-----|------|
-| `agent.page.evaluate(() => { ... })` | 任意のDOM操作 |
-| `agent.page.locator(selector)` | CSSセレクタで要素取得 |
+| action | args | 説明 |
+|--------|------|------|
+| `section` | `{ description }` | 以降の操作を指定セクション内に限定 |
+| `resetSection` | `{}` | スコーピングを解除し、ページ全体を対象に戻す |
+
+例:
+```bash
+curl --json '{"action":"section","args":{"description":"コメント欄"}}' http://localhost:3000/exec
+curl --json '{"action":"fillField","args":{"description":"入力欄","value":"コメント内容"}}' http://localhost:3000/exec
+curl --json '{"action":"clickButton","args":{"description":"投稿"}}' http://localhost:3000/exec
+curl --json '{"action":"resetSection"}' http://localhost:3000/exec
+```
+
+### 観察・スクリーンショット
+
+| action | args | 説明 |
+|--------|------|------|
+| `observe` | `{}` | ページ上のインタラクティブ要素を一覧取得 |
+| `screenshot` | `{ path }` | スクリーンショットを保存 |
+
+### エスケープハッチ
+
+| action | args | 説明 |
+|--------|------|------|
+| `evaluateFile` | `{ path }` | JSファイルを読み込んで実行 |
+
+### 制御
+
+| action | args | 説明 |
+|--------|------|------|
+| `shutdown` | `{}` | サーバーを停止する |
+
+---
+
+## observe の使い方
+
+observe はページに今どんな要素があるかを取得するアクション。
+
+**必ず最初の操作前に observe を実行すること。** ページの構造を知らずに操作しようとすると `not_found` エラーになりやすい。
+
+```bash
+curl --json '{"action":"observe"}' http://localhost:3000/exec
+```
+
+レスポンス例:
+```json
+{
+  "ok": true,
+  "result": {
+    "url": "https://example.com/login",
+    "title": "ログイン",
+    "buttons": ["ログイン", "パスワードを忘れた場合"],
+    "links": ["新規登録", "ヘルプ"],
+    "inputs": [
+      {"type": "email", "label": "メールアドレス"},
+      {"type": "password", "label": "パスワード"}
+    ],
+    "headings": ["ログイン"],
+    "forms": 1
+  },
+  "state": {"url": "https://example.com/login", "title": "ログイン"}
+}
+```
+
+この結果を見て:
+
+- `buttons` の中から操作したいボタン名を確認する
+- `inputs` の中から入力欄の `label` を description として使う
+- `links` の中からクリックしたいリンク名を確認する
+
+**予期しないエラーが続く場合も observe を実行して、ページが期待通りの状態かを確認する。**
+
+---
+
+## エスケープハッチ（evaluateFile）
+
+通常のアクションで対応できない複雑なデータ取得や操作は、JSファイルを書いて実行する。
+
+**Step 1: write ツールでJSファイルを作成する**
+
+```javascript
+// .taskp-tmp/extract.js
+Array.from(document.querySelectorAll('table tbody tr')).map(row => ({
+  name: row.cells[0]?.textContent?.trim(),
+  price: row.cells[1]?.textContent?.trim(),
+  stock: row.cells[2]?.textContent?.trim(),
+}))
+```
+
+**Step 2: curl でファイルを実行する**
+
+```bash
+curl --json '{"action":"evaluateFile","args":{"path":".taskp-tmp/extract.js"}}' http://localhost:3000/exec
+```
+
+レスポンス例:
+```json
+{"ok":true,"result":[{"name":"商品A","price":"1000円","stock":"在庫あり"}],"state":{"url":"...","title":"..."},"meta":{"durationMs":45}}
+```
+
+インラインでJSを書こうとするとシェルエスケープが複雑になる。ファイルに分けることで確実に実行できる。
+
+---
 
 ## レシピ（使用例）
 
-### レシピ1: フォーム投稿
+### フォーム投稿
 
-```typescript
-await agent.fillField('タイトル', '新しい記事');
-await agent.fillField('本文', '記事の内容です');
-await agent.clickButton('投稿');
-await agent.waitForText('投稿が完了しました');
-await agent.screenshot(`${SCREENSHOT_DIR}/posted.png`);
+```bash
+# 1. ページ移動
+curl --json '{"action":"goto","args":{"url":"https://example.com/contact"}}' http://localhost:3000/exec
+
+# 2. 何があるか確認
+curl --json '{"action":"observe"}' http://localhost:3000/exec
+
+# 3. 各フィールドに入力
+curl --json '{"action":"fillField","args":{"description":"お名前","value":"山田太郎"}}' http://localhost:3000/exec
+curl --json '{"action":"fillField","args":{"description":"メールアドレス","value":"yamada@example.com"}}' http://localhost:3000/exec
+curl --json '{"action":"fillField","args":{"description":"お問い合わせ内容","value":"製品について確認したいことがあります"}}' http://localhost:3000/exec
+
+# 4. 送信
+curl --json '{"action":"clickButton","args":{"description":"送信"}}' http://localhost:3000/exec
+
+# 5. 完了を待つ
+curl --json '{"action":"waitForText","args":{"text":"送信完了"}}' http://localhost:3000/exec
+
+# 6. スクリーンショット
+curl --json '{"action":"screenshot","args":{"path":"results/screenshots/contact-done.png"}}' http://localhost:3000/exec
 ```
 
-### レシピ2: 検索 + データ抽出
+### 検索 + データ抽出
 
-```typescript
-await agent.fillField('検索', 'Playwright');
-await agent.clickButton('検索');
-await agent.waitForVisible('検索結果');
-const titles = await agent.extractTexts('検索結果のタイトル');
-console.log(JSON.stringify(titles, null, 2));
+```bash
+# 1. ページ移動
+curl --json '{"action":"goto","args":{"url":"https://example.com/search"}}' http://localhost:3000/exec
+
+# 2. 観察
+curl --json '{"action":"observe"}' http://localhost:3000/exec
+
+# 3. 検索実行
+curl --json '{"action":"fillField","args":{"description":"検索欄","value":"TypeScript"}}' http://localhost:3000/exec
+curl --json '{"action":"clickButton","args":{"description":"検索"}}' http://localhost:3000/exec
+
+# 4. 結果が出るまで待つ
+curl --json '{"action":"waitForVisible","args":{"description":"検索結果"}}' http://localhost:3000/exec
+
+# 5. タイトル一覧を取得
+curl --json '{"action":"extractTexts","args":{"description":"検索結果のタイトル"}}' http://localhost:3000/exec
+
+# 6. スクリーンショット
+curl --json '{"action":"screenshot","args":{"path":"results/screenshots/search-results.png"}}' http://localhost:3000/exec
 ```
 
-### レシピ3: ログイン確認 + ナビゲーション
+### スコーピング
 
-```typescript
-const isLoggedIn = await agent.page.evaluate(() =>
-  !!document.querySelector('[data-testid="user-menu"]')
-);
-if (!isLoggedIn) {
-  console.error('❌ ログインされていません');
-  process.exit(1);
-}
-await agent.clickLink('ダッシュボード');
-await agent.waitForUrl('/dashboard');
+同じ名前のボタンが複数ある場合など、操作範囲を絞りたい時:
+
+```bash
+# 1. ページ移動と観察
+curl --json '{"action":"goto","args":{"url":"https://example.com/posts"}}' http://localhost:3000/exec
+curl --json '{"action":"observe"}' http://localhost:3000/exec
+
+# 2. 特定の記事カードにスコープを絞る
+curl --json '{"action":"section","args":{"description":"最新の記事カード"}}' http://localhost:3000/exec
+
+# 3. そのカード内のリンクをクリック
+curl --json '{"action":"clickLink","args":{"description":"続きを読む"}}' http://localhost:3000/exec
+
+# 4. スコーピング解除
+curl --json '{"action":"resetSection"}' http://localhost:3000/exec
+
+# 5. ページ全体に戻って観察
+curl --json '{"action":"observe"}' http://localhost:3000/exec
 ```
 
-### レシピ4: スコーピング（重複ラベル対応）
-
-```typescript
-const header = await agent.section('ヘッダー');
-await header.clickLink('設定');
-
-const main = await agent.section('メインコンテンツ');
-const title = await main.extractText('タイトル');
-```
-
-### レシピ5: テーブルデータ抽出
-
-```typescript
-const data = await agent.page.evaluate(() =>
-  Array.from(document.querySelectorAll('table tbody tr')).map(row => ({
-    name: row.cells[0]?.textContent?.trim(),
-    price: row.cells[1]?.textContent?.trim(),
-  }))
-);
-console.log(JSON.stringify(data, null, 2));
-```
+---
 
 ## 認証
 
-CDP接続モードでは、起動済みの Chrome ブラウザをそのまま操作します。Chrome にログイン済みであれば、追加の認証設定は不要です。
+CDPモードは既存のChromeセッションに接続する。ログイン済みのCookieやセッションをそのまま使えるため、認証情報をスキルに渡す必要がない。
 
-### storageState による認証（フォールバック）
-
-CDP が使えない環境や別セッションが必要な場合は、storageState を使います。
-
-**ログイン状態の保存:**
+Chromeが起動していない場合:
 
 ```bash
-bun run src/login.ts <url> <site-name>
+bun run chrome
 ```
 
-headed モードでブラウザが開くので、手動でログインしてから Enter を押してください。`auth/<site-name>.json` にセッションが保存されます。
-
-**スクリプトでの使用:**
-
-操作対象の URL のホスト名から site-name を導出し、`auth/` ディレクトリに対応する JSON ファイルが存在する場合は `browser.newContext({ storageState: AUTH_FILE })` で復元してください。
-
-例:
-- `https://github.com/...` → `auth/github.json` があれば `AUTH_FILE = "auth/github.json"`
-- `https://admin.example.com/dashboard` → `auth/admin.example.com.json`
-- 認証不要 or ファイルなし → storageState の設定をスキップ
-
-## リペアループ（失敗時の自動リトライ）
-
-スクリプトが失敗すると `results/error-report.json` に構造化エラーが出力されます。
-
-**error-report.json の構造:**
-
-```json
-{
-  "action": "clickButton",
-  "description": "投稿",
-  "failureType": "not_found",
-  "triedStrategies": ["getByRole('button')", "getByText()"],
-  "candidates": [],
-  "currentUrl": "https://example.com/editor",
-  "pageTitle": "記事編集",
-  "message": "clickButton(\"投稿\") failed: \"投稿\" に一致する要素が見つかりません"
-}
-```
-
-**failureType 別の対処:**
-
-| failureType | 原因 | 対処 |
-|-------------|------|------|
-| `not_found` | description がページ上のラベルと一致しない | description を実際のボタン文字に変更 |
-| `ambiguous` | 同名要素が複数ある | `agent.section()` でスコープを絞る |
-| `not_actionable` | 要素が非表示または無効 | `agent.waitForVisible()` を前に追加する |
-| `timeout` | 処理が遅い、またはSPAのレンダリング待ち | `waitForText` / `waitForUrl` を追加する |
-
-**リトライは最大1回**。2回目も失敗した場合はエラーを報告して停止してください。
+これにより、`~/chrome-automation` のプロファイルをコピーしてCDPポート9222で起動する。通常のChromeでログインしてあれば、セッションがそのまま引き継がれる。

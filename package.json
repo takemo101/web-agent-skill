@@ -11,7 +11,8 @@
 		"test:watch": "vitest",
 		"verify": "biome check . && tsc --noEmit && vitest run",
 		"setup": "npx playwright install chromium",
-		"chrome": "bun run src/chrome.ts"
+		"chrome": "bun run src/chrome.ts",
+		"repl": "npx tsx src/repl-server.ts"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.4.9",
