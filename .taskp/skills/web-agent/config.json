@@ -3,6 +3,7 @@
   "authDir": "auth",
   "timeout": 30000,
   "cdpEndpoint": "http://localhost:9222",
+  "chromeProfileDir": "~/chrome-automation",
   "viewport": {
     "width": 1280,
     "height": 768

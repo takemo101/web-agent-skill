@@ -1,4 +1,5 @@
 node_modules/
+chrome/
 .taskp-tmp/
 .env
 *.log

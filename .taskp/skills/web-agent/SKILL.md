@@ -79,7 +79,7 @@ const TIMEOUT = 30000;
 - `createAgent(page)` で agent を作り、`agent.xxx()` でDOM操作する
 - 生のCSSセレクタやXPathは使わない（agent が内部で自動検出する）
 - 抽出データは `console.log` で JSON 出力する
-- `bun run` で実行する（`tsx` ではない）
+- `npx tsx` で実行する（`bun run` ではない）
 - import パスは `../src/helpers/index.ts`（`.taskp-tmp/agent-run.ts` からの相対パス）
 - `finally` ブロックで `page.close()` → `browser.close()` → `process.exit(exitCode)` を必ず呼ぶ
 - `waitForNavigation` は使わない。代わりに `waitForUrl` または `waitForText` を使う
@@ -89,10 +89,10 @@ const TIMEOUT = 30000;
 `bash` ツールで以下のコマンドを実行してください:
 
 ```bash
-bun run {{__cwd__}}/.taskp-tmp/agent-run.ts
+npx tsx {{__cwd__}}/.taskp-tmp/agent-run.ts
 ```
 
-> `tsx` ではなく `bun run` を使うこと
+> `bun run` ではなく `npx tsx` を使うこと（BunのWebSocket実装がCDP接続と非互換のため）
 
 **失敗時のリペアループ:**
 
