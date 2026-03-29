@@ -30,8 +30,8 @@ curl -s http://localhost:3000/health
 ### 2. ページ移動と観察
 
 ```bash
-curl --json '{"action":"goto","args":{"url":"{{url}}"}}' http://localhost:3000/exec
-curl --json '{"action":"observe"}' http://localhost:3000/exec
+curl --json '{"action":"goto","args":{"url":"{{url}}"}}' 'http://localhost:3000/exec?session={{url}}'
+curl --json '{"action":"observe"}' 'http://localhost:3000/exec?session={{url}}'
 ```
 
 observeの結果でボタン・入力欄・リンク名を確認する。
@@ -39,18 +39,20 @@ observeの結果でボタン・入力欄・リンク名を確認する。
 ### 3. 操作（1つずつ実行）
 
 ```bash
-curl --json '{"action":"fillField","args":{"description":"入力欄名","value":"値"}}' http://localhost:3000/exec
-curl --json '{"action":"clickButton","args":{"description":"ボタン名"}}' http://localhost:3000/exec
-curl --json '{"action":"screenshot","args":{"path":"results/screenshots/step.png"}}' http://localhost:3000/exec
+curl --json '{"action":"fillField","args":{"description":"入力欄名","value":"値"}}' 'http://localhost:3000/exec?session={{url}}'
+curl --json '{"action":"clickButton","args":{"description":"ボタン名"}}' 'http://localhost:3000/exec?session={{url}}'
+curl --json '{"action":"screenshot","args":{"path":"results/screenshots/step.png"}}' 'http://localhost:3000/exec?session={{url}}'
 ```
 
-使えるaction: goto, clickButton, clickLink, click, fillField, selectOption, check, uncheck, waitForText, waitForUrl, waitForVisible, extractText, extractTexts, observe, screenshot, shutdown
+使えるaction: goto, clickButton, clickLink, click, fillField, selectOption, check, uncheck, waitForText, waitForUrl, waitForVisible, extractText, extractTexts, observe, screenshot, close
+
+全curlに `?session={{url}}` を付けること。closeは自分のセッション(タブ)だけ閉じる。
 
 失敗時はdescriptionを変えて再試行。observeで正しい名前を確認。
 
 ### 4. 完了
 
 ```bash
-curl --json '{"action":"screenshot","args":{"path":"results/screenshots/final.png"}}' http://localhost:3000/exec
-curl --json '{"action":"shutdown"}' http://localhost:3000/exec
+curl --json '{"action":"screenshot","args":{"path":"results/screenshots/final.png"}}' 'http://localhost:3000/exec?session={{url}}'
+curl --json '{"action":"close"}' 'http://localhost:3000/exec?session={{url}}'
 ```

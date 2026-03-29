@@ -18,6 +18,14 @@ interface ExecRequestBody {
 	timeoutMs?: number;
 }
 
+interface Session {
+	id: string;
+	page: Page;
+	rootAgent: WebAgent;
+	currentAgent: WebAgent;
+	busy: boolean;
+}
+
 const CONFIG_PATH = resolve(process.cwd(), ".taskp/skills/web-agent/config.json");
 const DEFAULT_CDP_ENDPOINT = "http://localhost:9222";
 const DEFAULT_REPL_PORT = 3000;
@@ -34,51 +42,30 @@ function loadConfig(): SkillConfig {
 }
 
 function parsePort(input: string | undefined, fallback: number): number {
-	if (!input) {
-		return fallback;
-	}
-
+	if (!input) return fallback;
 	const parsed = Number.parseInt(input, 10);
-	if (!Number.isFinite(parsed) || parsed <= 0) {
-		return fallback;
-	}
-
-	return parsed;
+	return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function parseTimeout(input: unknown, fallback: number): number {
-	if (typeof input !== "number" || !Number.isFinite(input) || input <= 0) {
-		return fallback;
-	}
-
-	return input;
+	return typeof input === "number" && Number.isFinite(input) && input > 0 ? input : fallback;
 }
 
 async function getPageState(page: Page): Promise<{ url: string; title: string }> {
-	return {
-		url: page.url(),
-		title: await page.title(),
-	};
+	try {
+		return { url: page.url(), title: await page.title() };
+	} catch {
+		return { url: "unknown", title: "unknown" };
+	}
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
 	const chunks: Buffer[] = [];
-
 	for await (const chunk of req) {
-		if (typeof chunk === "string") {
-			chunks.push(Buffer.from(chunk));
-			continue;
-		}
-
-		chunks.push(chunk);
+		chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
 	}
-
-	if (chunks.length === 0) {
-		return {};
-	}
-
-	const raw = Buffer.concat(chunks).toString("utf-8");
-	return JSON.parse(raw) as unknown;
+	if (chunks.length === 0) return {};
+	return JSON.parse(Buffer.concat(chunks).toString("utf-8")) as unknown;
 }
 
 function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
@@ -88,10 +75,7 @@ function sendJson(res: ServerResponse, statusCode: number, body: unknown): void 
 }
 
 function toExecBody(input: unknown): ExecRequestBody {
-	if (typeof input !== "object" || input === null) {
-		return { action: "" };
-	}
-
+	if (typeof input !== "object" || input === null) return { action: "" };
 	const body = input as Record<string, unknown>;
 	return {
 		action: typeof body.action === "string" ? body.action : "",
@@ -101,14 +85,8 @@ function toExecBody(input: unknown): ExecRequestBody {
 }
 
 function toErrorPayload(error: unknown): Record<string, unknown> {
-	if (error instanceof ActionError) {
-		return error.toJSON();
-	}
-
-	if (error instanceof Error) {
-		return { message: error.message };
-	}
-
+	if (error instanceof ActionError) return error.toJSON();
+	if (error instanceof Error) return { message: error.message };
 	return { message: "Unknown error" };
 }
 
@@ -119,30 +97,20 @@ function createObserveScript(): string {
 			const style = getComputedStyle(element);
 			return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
 		});
-
 		return {
 			buttons: getVisible("button, [role='button'], input[type='submit']")
-				.map((element) => element.textContent?.trim() || element.getAttribute("aria-label") || "")
-				.filter(Boolean)
-				.slice(0, 20),
+				.map((el) => el.textContent?.trim() || el.getAttribute("aria-label") || "").filter(Boolean).slice(0, 20),
 			links: getVisible("a[href]")
-				.map((element) => element.textContent?.trim() || element.getAttribute("aria-label") || "")
-				.filter(Boolean)
-				.slice(0, 20),
+				.map((el) => el.textContent?.trim() || el.getAttribute("aria-label") || "").filter(Boolean).slice(0, 20),
 			inputs: getVisible("input, textarea, select, [contenteditable='true']")
-				.map((element) => ({
-					type: element.tagName.toLowerCase() === "select" ? "select" : element.getAttribute("type") || "text",
-					label:
-						element.getAttribute("aria-label") ||
-						document.querySelector("label[for='" + element.id + "']")?.textContent?.trim() ||
-						element.getAttribute("placeholder") ||
-						"",
-				}))
-				.slice(0, 20),
+				.map((el) => ({
+					type: el.tagName.toLowerCase() === "select" ? "select" : el.getAttribute("type") || "text",
+					label: el.getAttribute("aria-label")
+						|| document.querySelector("label[for='" + el.id + "']")?.textContent?.trim()
+						|| el.getAttribute("placeholder") || "",
+				})).slice(0, 20),
 			headings: getVisible("h1, h2, h3")
-				.map((element) => element.textContent?.trim() || "")
-				.filter(Boolean)
-				.slice(0, 10),
+				.map((el) => el.textContent?.trim() || "").filter(Boolean).slice(0, 10),
 			forms: document.querySelectorAll("form").length,
 		};
 	})()`;
@@ -156,11 +124,9 @@ const defaultActionTimeoutMs = config.timeout ?? DEFAULT_ACTION_TIMEOUT_MS;
 async function tryShutdownExisting(): Promise<void> {
 	try {
 		const res = await fetch(`http://127.0.0.1:${port}/shutdown`, { method: "POST", signal: AbortSignal.timeout(2000) });
-		if (res.ok) {
-			await new Promise((r) => setTimeout(r, 1000));
-		}
+		if (res.ok) await new Promise((r) => setTimeout(r, 1000));
 	} catch {
-		// サーバーが動いていなければ無視
+		// no existing server
 	}
 }
 
@@ -168,123 +134,129 @@ await tryShutdownExisting();
 
 const browser = await chromium.connectOverCDP(cdpEndpoint);
 const [context] = browser.contexts();
+if (!context) throw new Error("No browser context found via CDP");
 
-if (!context) {
-	throw new Error("No browser context found via CDP");
-}
-
-const page = await context.newPage();
-const rootAgent = createAgent(page);
-let currentAgent: WebAgent = rootAgent;
-let busy = false;
+const sessions = new Map<string, Session>();
 let shuttingDown = false;
 let idleTimer: NodeJS.Timeout | undefined;
 
-const shutdown = async (): Promise<void> => {
-	if (shuttingDown) {
-		return;
-	}
+async function getOrCreateSession(id: string): Promise<Session> {
+	const existing = sessions.get(id);
+	if (existing) return existing;
 
+	const page = await context.newPage();
+	const rootAgent = createAgent(page);
+	const session: Session = { id, page, rootAgent, currentAgent: rootAgent, busy: false };
+	sessions.set(id, session);
+	return session;
+}
+
+async function destroySession(id: string): Promise<void> {
+	const session = sessions.get(id);
+	if (!session) return;
+	sessions.delete(id);
+	await session.page.close().catch(() => {});
+}
+
+const shutdownServer = async (): Promise<void> => {
+	if (shuttingDown) return;
 	shuttingDown = true;
-	if (idleTimer) {
-		clearTimeout(idleTimer);
-	}
+	if (idleTimer) clearTimeout(idleTimer);
 
-	await Promise.allSettled([page.close(), browser.close()]);
+	const closePromises = Array.from(sessions.values()).map((s) => s.page.close().catch(() => {}));
+	await Promise.allSettled(closePromises);
+	await browser.close().catch(() => {});
 	process.exit(0);
 };
 
 const resetIdleTimer = (): void => {
-	if (idleTimer) {
-		clearTimeout(idleTimer);
-	}
-
-	idleTimer = setTimeout(() => {
-		void shutdown();
-	}, IDLE_TIMEOUT_MS);
+	if (idleTimer) clearTimeout(idleTimer);
+	idleTimer = setTimeout(() => void shutdownServer(), IDLE_TIMEOUT_MS);
 };
 
-const runAction = async (body: ExecRequestBody): Promise<unknown> => {
-	const args = body.args ?? {};
-	const timeout = parseTimeout(body.timeoutMs, defaultActionTimeoutMs);
+function buildRunAction(session: Session) {
+	return async (body: ExecRequestBody): Promise<unknown> => {
+		const args = body.args ?? {};
+		const timeout = parseTimeout(body.timeoutMs, defaultActionTimeoutMs);
+		const { page } = session;
 
-	const handlers: Record<string, () => Promise<unknown>> = {
-		goto: async () => {
-			await page.goto(String(args.url ?? ""), { timeout, waitUntil: "domcontentloaded" });
-			return null;
-		},
-		clickButton: async () => currentAgent.clickButton(String(args.description ?? "")),
-		clickLink: async () => currentAgent.clickLink(String(args.description ?? "")),
-		click: async () => currentAgent.click(String(args.description ?? "")),
-		fillField: async () => currentAgent.fillField(String(args.description ?? ""), String(args.value ?? "")),
-		selectOption: async () => currentAgent.selectOption(String(args.description ?? ""), String(args.value ?? "")),
-		check: async () => currentAgent.check(String(args.description ?? "")),
-		uncheck: async () => currentAgent.uncheck(String(args.description ?? "")),
-		waitForText: async () =>
-			currentAgent.waitForText(String(args.text ?? ""), { timeout: parseTimeout(args.timeoutMs, timeout) }),
-		waitForUrl: async () =>
-			currentAgent.waitForUrl(String(args.pattern ?? ""), { timeout: parseTimeout(args.timeoutMs, timeout) }),
-		waitForVisible: async () =>
-			currentAgent.waitForVisible(String(args.description ?? ""), { timeout: parseTimeout(args.timeoutMs, timeout) }),
-		waitForHidden: async () =>
-			currentAgent.waitForHidden(String(args.description ?? ""), { timeout: parseTimeout(args.timeoutMs, timeout) }),
-		assertVisible: async () => currentAgent.assertVisible(String(args.description ?? "")),
-		assertText: async () => currentAgent.assertText(String(args.description ?? ""), String(args.expected ?? "")),
-		extractText: async () => currentAgent.extractText(String(args.description ?? "")),
-		extractTexts: async () => currentAgent.extractTexts(String(args.description ?? "")),
-		extractAttribute: async () =>
-			currentAgent.extractAttribute(String(args.description ?? ""), String(args.attribute ?? "")),
-		section: async () => {
-			currentAgent = await currentAgent.section(String(args.description ?? ""));
-			return null;
-		},
-		resetSection: async () => {
-			currentAgent = rootAgent;
-			return null;
-		},
-		screenshot: async () => currentAgent.screenshot(String(args.path ?? "")),
-		observe: async () => page.evaluate(createObserveScript()),
-		evaluateFile: async () => {
-			const code = readFileSync(String(args.path ?? ""), "utf-8");
-			return page.evaluate(code);
-		},
-		shutdown: async () => {
-			setTimeout(() => {
-				void shutdown();
-			}, 100);
-			return "shutting down";
-		},
+		const handlers: Record<string, () => Promise<unknown>> = {
+			goto: async () => {
+				await page.goto(String(args.url ?? ""), { timeout, waitUntil: "domcontentloaded" });
+				return null;
+			},
+			clickButton: async () => session.currentAgent.clickButton(String(args.description ?? "")),
+			clickLink: async () => session.currentAgent.clickLink(String(args.description ?? "")),
+			click: async () => session.currentAgent.click(String(args.description ?? "")),
+			fillField: async () => session.currentAgent.fillField(String(args.description ?? ""), String(args.value ?? "")),
+			selectOption: async () =>
+				session.currentAgent.selectOption(String(args.description ?? ""), String(args.value ?? "")),
+			check: async () => session.currentAgent.check(String(args.description ?? "")),
+			uncheck: async () => session.currentAgent.uncheck(String(args.description ?? "")),
+			waitForText: async () =>
+				session.currentAgent.waitForText(String(args.text ?? ""), {
+					timeout: parseTimeout(args.timeoutMs, timeout),
+				}),
+			waitForUrl: async () =>
+				session.currentAgent.waitForUrl(String(args.pattern ?? ""), {
+					timeout: parseTimeout(args.timeoutMs, timeout),
+				}),
+			waitForVisible: async () =>
+				session.currentAgent.waitForVisible(String(args.description ?? ""), {
+					timeout: parseTimeout(args.timeoutMs, timeout),
+				}),
+			waitForHidden: async () =>
+				session.currentAgent.waitForHidden(String(args.description ?? ""), {
+					timeout: parseTimeout(args.timeoutMs, timeout),
+				}),
+			assertVisible: async () => session.currentAgent.assertVisible(String(args.description ?? "")),
+			assertText: async () =>
+				session.currentAgent.assertText(String(args.description ?? ""), String(args.expected ?? "")),
+			extractText: async () => session.currentAgent.extractText(String(args.description ?? "")),
+			extractTexts: async () => session.currentAgent.extractTexts(String(args.description ?? "")),
+			extractAttribute: async () =>
+				session.currentAgent.extractAttribute(String(args.description ?? ""), String(args.attribute ?? "")),
+			section: async () => {
+				session.currentAgent = await session.currentAgent.section(String(args.description ?? ""));
+				return null;
+			},
+			resetSection: async () => {
+				session.currentAgent = session.rootAgent;
+				return null;
+			},
+			screenshot: async () => session.currentAgent.screenshot(String(args.path ?? "")),
+			observe: async () => page.evaluate(createObserveScript()),
+			evaluateFile: async () => {
+				const code = readFileSync(String(args.path ?? ""), "utf-8");
+				return page.evaluate(code);
+			},
+			close: async () => {
+				await destroySession(session.id);
+				return "session closed";
+			},
+		};
+
+		const handler = handlers[body.action];
+		if (!handler) throw new Error(`Unsupported action: ${body.action}`);
+		return handler();
 	};
-
-	const handler = handlers[body.action];
-	if (!handler) {
-		throw new Error(`Unsupported action: ${body.action}`);
-	}
-
-	return handler();
-};
+}
 
 const server = createServer(async (req, res) => {
 	resetIdleTimer();
-
 	const startAt = Date.now();
 	const method = req.method ?? "GET";
 	const url = new URL(req.url ?? "/", `http://${req.headers.host ?? `127.0.0.1:${port}`}`);
 
 	if (method === "GET" && url.pathname === "/health") {
-		sendJson(res, 200, {
-			ok: true,
-			busy,
-			state: await getPageState(page),
-		});
+		const sessionList = Array.from(sessions.keys());
+		sendJson(res, 200, { ok: true, sessions: sessionList });
 		return;
 	}
 
 	if (method === "POST" && url.pathname === "/shutdown") {
 		sendJson(res, 200, { ok: true });
-		setTimeout(() => {
-			void shutdown();
-		}, 100);
+		setTimeout(() => void shutdownServer(), 100);
 		return;
 	}
 
@@ -293,40 +265,42 @@ const server = createServer(async (req, res) => {
 		return;
 	}
 
-	if (busy) {
+	const sessionId = url.searchParams.get("session") ?? "default";
+	const session = await getOrCreateSession(sessionId);
+
+	if (session.busy) {
 		sendJson(res, 503, {
 			ok: false,
-			error: { message: "Server busy, try again" },
-			state: await getPageState(page),
+			error: { message: "Session busy, try again" },
+			session: sessionId,
+			state: await getPageState(session.page),
 			meta: { durationMs: Date.now() - startAt },
 		});
 		return;
 	}
 
-	busy = true;
+	session.busy = true;
 
 	try {
 		const body = toExecBody(await readJsonBody(req));
-		if (!body.action) {
-			throw new Error("Request body must include action");
-		}
+		if (!body.action) throw new Error("Request body must include action");
 
+		const runAction = buildRunAction(session);
 		const result = await runAction(body);
-		sendJson(res, 200, {
-			ok: true,
-			result,
-			state: await getPageState(page),
-			meta: { durationMs: Date.now() - startAt },
-		});
+
+		const state = sessions.has(sessionId) ? await getPageState(session.page) : { url: "closed", title: "closed" };
+		sendJson(res, 200, { ok: true, result, session: sessionId, state, meta: { durationMs: Date.now() - startAt } });
 	} catch (error) {
+		const state = sessions.has(sessionId) ? await getPageState(session.page) : { url: "closed", title: "closed" };
 		sendJson(res, 200, {
 			ok: false,
 			error: toErrorPayload(error),
-			state: await getPageState(page),
+			session: sessionId,
+			state,
 			meta: { durationMs: Date.now() - startAt },
 		});
 	} finally {
-		busy = false;
+		if (sessions.has(sessionId)) session.busy = false;
 	}
 });
 
@@ -335,10 +309,5 @@ server.listen(port, "127.0.0.1", () => {
 	console.log(JSON.stringify({ ok: true, port }));
 });
 
-process.on("SIGINT", () => {
-	void shutdown();
-});
-
-process.on("SIGTERM", () => {
-	void shutdown();
-});
+process.on("SIGINT", () => void shutdownServer());
+process.on("SIGTERM", () => void shutdownServer());
