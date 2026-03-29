@@ -1,8 +1,0 @@
-# taskp — 設定ファイル
-
-[ai]
-default_provider = "ollama"
-default_model = "qwen3.5:9b"
-
-[ai.providers.ollama]
-base_url = "http://localhost:11434/v1"
