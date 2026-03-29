@@ -153,6 +153,19 @@ const cdpEndpoint = process.env.CDP_ENDPOINT ?? config.cdpEndpoint ?? DEFAULT_CD
 const port = parsePort(process.env.REPL_PORT, config.replPort ?? DEFAULT_REPL_PORT);
 const defaultActionTimeoutMs = config.timeout ?? DEFAULT_ACTION_TIMEOUT_MS;
 
+async function tryShutdownExisting(): Promise<void> {
+	try {
+		const res = await fetch(`http://127.0.0.1:${port}/shutdown`, { method: "POST", signal: AbortSignal.timeout(2000) });
+		if (res.ok) {
+			await new Promise((r) => setTimeout(r, 1000));
+		}
+	} catch {
+		// サーバーが動いていなければ無視
+	}
+}
+
+await tryShutdownExisting();
+
 const browser = await chromium.connectOverCDP(cdpEndpoint);
 const [context] = browser.contexts();
 
@@ -316,19 +329,6 @@ const server = createServer(async (req, res) => {
 		busy = false;
 	}
 });
-
-async function tryShutdownExisting(): Promise<void> {
-	try {
-		const res = await fetch(`http://127.0.0.1:${port}/shutdown`, { method: "POST", signal: AbortSignal.timeout(2000) });
-		if (res.ok) {
-			await new Promise((r) => setTimeout(r, 1000));
-		}
-	} catch {
-		// サーバーが動いていなければ無視
-	}
-}
-
-await tryShutdownExisting();
 
 server.listen(port, "127.0.0.1", () => {
 	resetIdleTimer();
