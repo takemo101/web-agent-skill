@@ -65,10 +65,10 @@ mkdir -p {{__cwd__}}/.taskp-tmp
 
 | プレースホルダー | 値 |
 |----------------|-----|
-| `{{TARGET_URL}}` | {{url}} |
-| `{{CDP_ENDPOINT}}` | config.json の `cdpEndpoint` |
-| `{{SCREENSHOT_DIR}}` | config.json の `screenshotDir` |
-| `{{TIMEOUT}}` | config.json の `timeout` |
+| `\{{TARGET_URL}}` | {{url}} |
+| `\{{CDP_ENDPOINT}}` | config.json の `cdpEndpoint` |
+| `\{{SCREENSHOT_DIR}}` | config.json の `screenshotDir` |
+| `\{{TIMEOUT}}` | config.json の `timeout` |
 
 **スクリプト生成ルール:**
 
