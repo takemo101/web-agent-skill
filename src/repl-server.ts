@@ -317,6 +317,19 @@ const server = createServer(async (req, res) => {
 	}
 });
 
+async function tryShutdownExisting(): Promise<void> {
+	try {
+		const res = await fetch(`http://127.0.0.1:${port}/shutdown`, { method: "POST", signal: AbortSignal.timeout(2000) });
+		if (res.ok) {
+			await new Promise((r) => setTimeout(r, 1000));
+		}
+	} catch {
+		// サーバーが動いていなければ無視
+	}
+}
+
+await tryShutdownExisting();
+
 server.listen(port, "127.0.0.1", () => {
 	resetIdleTimer();
 	console.log(JSON.stringify({ ok: true, port }));
