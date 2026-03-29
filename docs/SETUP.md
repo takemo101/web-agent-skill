@@ -7,6 +7,7 @@
 | Bun | >= 1.2.0 | `bun --version` |
 | Node.js | >= 18 | `node --version` |
 | taskp | 最新 | `taskp --version` |
+| Google Chrome | 最新 | — |
 
 ## 技術スタック
 
@@ -16,8 +17,7 @@
 | lint + format | Biome | 2.4.9 |
 | 型チェック | TypeScript | 6.0.2 |
 | テスト | Vitest | 4.1.2 |
-| ブラウザ自動化 | Midscene.js | 1.6.0 |
-| ブラウザエンジン | Playwright | 1.58.2 |
+| ブラウザ接続 | Playwright CDP | 1.58.2 |
 
 ## Step 1: taskp のインストール
 
@@ -32,7 +32,7 @@ taskp --version
 ## Step 2: プロジェクトセットアップ
 
 ```bash
-cd /path/to/ai-web-tester
+cd /path/to/web-agent-skill
 
 # taskp の初期化
 taskp setup
@@ -41,39 +41,39 @@ taskp setup
 bun install
 ```
 
-## Step 3: ブラウザのインストール
+## Step 3: Chrome を CDP モードで起動
+
+CDP（Chrome DevTools Protocol）経由で既存のChromeに接続する。これにより、ログイン済みのセッション・Cookie・Chrome拡張機能をそのまま利用できる。
+
+### macOS
 
 ```bash
-# Playwright の Chromium をインストール
-npx playwright install chromium
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222
 ```
 
-## Step 3b: Bridge Mode のセットアップ（任意）
-
-Bridge Mode を使うと、Playwright が新しいブラウザを起動する代わりに、ユーザーが普段使っている Chrome に直接接続して操作できる。ログイン済みの状態や Chrome 拡張機能をそのまま使えるため、storageState の管理が不要になる。
-
-### Chrome 拡張のインストール
-
-[Midscene Chrome Extension](https://chromewebstore.google.com/detail/midscene/gbldofcpkknbggpkmbdaefngejllnief) を Chrome Web Store からインストールする。
-
-インストール後、拡張機能アイコンをクリックして Bridge Server が待機状態（ポート 3766）になっていることを確認する。
-
-### 動作確認
+### Linux
 
 ```bash
-# Bridge Mode で実行
-taskp run web-agent --set bridge_mode=true
+google-chrome --remote-debugging-port=9222
+```
+
+### 接続確認
+
+```bash
+# CDPエンドポイントが応答するか確認
+curl http://localhost:9222/json/version
+# → {"Browser":"Chrome/...","WebKit-Version":"..."} が返れば OK
 ```
 
 ### 注意事項
 
-- 実行中は Chrome を手動で操作しない。AgentOverChromeBridge が自律的にタブを制御するため、同時操作すると予期しない動作になる
-- Chrome を開いたまま維持すること。Bridge Server は Chrome の拡張機能として動作しているため、Chrome を閉じると接続が切れる
-- 通常モード（Playwright）は引き続き利用できる。`bridge_mode=true` を指定しない限り、従来の動作で動くため、`npx playwright install chromium` は引き続き推奨
+- すでにChromeが起動している場合は、一度すべてのウィンドウを閉じてから上記コマンドで起動する
+- `--remote-debugging-port=9222` はデフォルト設定。`config.json` の `cdpEndpoint` と合わせること
+- Chromeを閉じると接続が切れる。自動化実行中はChromeを維持しておく
 
 ## Step 4: LLM の設定
 
-使用するモデルに応じて設定する。詳細は [MODEL-STRATEGY.md](./MODEL-STRATEGY.md) を参照。
+使用するモデルに応じて設定する。スクリプト生成用のLLM（第1層）のみ設定すればよい。
 
 ### パターン A: 完全ローカル（無料）
 
@@ -89,21 +89,14 @@ curl -fsSL https://ollama.com/install.sh | sh
 
 #### 2. モデルのダウンロード
 
-2つのモデルが必要。第1層（コード生成）と第2層（Vision）で役割が異なる。
+スクリプト生成用のテキストモデルだけあればよい。
 
 ```bash
-# 第1層: スクリプト生成用（テキストモデル）
+# スクリプト生成用（テキストモデル）
 ollama pull qwen2.5-coder:7b    # ~4.7GB
-
-# 第2層: ブラウザ操作用（Vision モデル）⚠️ 必ず Vision 対応モデル
-ollama pull qwen2.5-vl:7b       # ~4.7GB
 ```
 
-**⚠️ 第2層は Vision 対応モデルが必須。** `qwen2.5:7b`（テキストのみ）では動作しません。
-
 ##### モデルの選択肢
-
-第1層（コード生成）:
 
 | モデル | サイズ | 品質 | 速度 |
 |--------|--------|:---:|:---:|
@@ -112,30 +105,7 @@ ollama pull qwen2.5-vl:7b       # ~4.7GB
 | `deepseek-coder-v2:16b` | 9GB | ◎ | ○ |
 | `codellama:7b` | 3.8GB | △ | ◎ |
 
-第2層（Vision、ブラウザ操作）:
-
-| モデル | サイズ | 精度 | 速度 |
-|--------|--------|:---:|:---:|
-| `qwen2.5-vl:7b`（推奨） | 4.7GB | ○ | ◎ |
-| `llama3.2-vision:11b` | 6.7GB | ○ | ○ |
-| `qwen2.5-vl:32b` | 19GB | ◎ | △ |
-
-#### 3. Ollama の CORS 設定
-
-Midscene からの API アクセスに必要。
-
-```bash
-# macOS
-launchctl setenv OLLAMA_ORIGINS "*"
-# → Ollama アプリを再起動
-
-# Linux（.bashrc に追記）
-echo 'export OLLAMA_ORIGINS="*"' >> ~/.bashrc
-source ~/.bashrc
-# → ollama serve を再起動
-```
-
-#### 4. Ollama の起動確認
+#### 3. Ollama の起動確認
 
 ```bash
 # 起動（バックグラウンド or 別ターミナル）
@@ -144,15 +114,9 @@ ollama serve
 # 動作確認
 curl http://localhost:11434/api/tags
 # → ダウンロード済みモデル一覧が表示される
-
-# モデル一覧確認
-ollama list
-# NAME                 ID            SIZE
-# qwen2.5-coder:7b     ...           4.7 GB
-# qwen2.5-vl:7b        ...           4.7 GB
 ```
 
-#### 5. 第1層の設定（taskp Agent）
+#### 4. taskp Agent の設定
 
 ```toml
 # .taskp/config.toml
@@ -164,24 +128,11 @@ default_model = "qwen2.5-coder:7b"
 base_url = "http://localhost:11434/v1"  # /v1 が必要（OpenAI互換エンドポイント）
 ```
 
-#### 6. 第2層の設定（Midscene Vision LLM）
+#### 5. ローカル動作確認
 
 ```bash
-# .env
-MIDSCENE_MODEL_NAME=qwen2.5-vl:7b
-MIDSCENE_MODEL_BASE_URL=http://localhost:11434/v1
-MIDSCENE_MODEL_API_KEY=ollama
-MIDSCENE_MODEL_FAMILY=qwen-vl
-```
-
-#### 7. ローカル動作確認
-
-```bash
-# 第1層の確認（テキスト生成）
+# テキスト生成の確認
 ollama run qwen2.5-coder:7b "console.log('hello') の TypeScript コードを書いて"
-
-# 第2層の確認（API互換エンドポイント）
-curl http://localhost:11434/v1/models
 
 # 全体の確認
 taskp run web-agent
@@ -191,23 +142,19 @@ taskp run web-agent
 
 | 項目 | 最低 | 推奨 |
 |------|------|------|
-| RAM | 16GB | 32GB |
-| VRAM（GPU） | 6GB | 8GB+ |
-| ストレージ | 10GB 空き | 20GB 空き |
+| RAM | 8GB | 16GB |
+| VRAM（GPU） | 4GB | 6GB+ |
+| ストレージ | 5GB 空き | 10GB 空き |
 
 - **Apple Silicon Mac**: Metal で高速に動作（M1 以降推奨）
 - **NVIDIA GPU**: CUDA で高速（RTX 3060 以上推奨）
-- **CPU のみ**: 動作するが非常に遅い（1ステップ 30〜60秒）
+- **CPU のみ**: 動作するが遅い（1スクリプト生成に 10〜30秒）
 
 ### パターン B: クラウド API
 
 ```bash
 # .env に APIキーを設定
-ANTHROPIC_API_KEY=sk-ant-...         # 第1層: taskp Agent 用
-MIDSCENE_MODEL_NAME=gemini-2.5-flash  # 第2層: Midscene 用
-MIDSCENE_MODEL_API_KEY=AIza...
-MIDSCENE_MODEL_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
-MIDSCENE_MODEL_FAMILY=gemini
+ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 taskp の設定:
@@ -220,28 +167,6 @@ default_model = "claude-sonnet-4-20250514"
 
 [ai.providers.anthropic]
 api_key_env = "ANTHROPIC_API_KEY"
-```
-
-### パターン C: ハイブリッド
-
-```bash
-# .env
-# 第2層のみクラウド（Vision は精度が重要）
-MIDSCENE_MODEL_NAME=gemini-2.5-flash
-MIDSCENE_MODEL_API_KEY=AIza...
-MIDSCENE_MODEL_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
-MIDSCENE_MODEL_FAMILY=gemini
-```
-
-```toml
-# .taskp/config.toml
-# 第1層はローカル（コード生成は十分）
-[ai]
-default_provider = "ollama"
-default_model = "qwen2.5-coder:7b"
-
-[ai.providers.ollama]
-base_url = "http://localhost:11434/v1"  # /v1 が必要（OpenAI互換エンドポイント）
 ```
 
 ## Step 5: コード品質チェック
@@ -278,28 +203,24 @@ taskp run web-agent
 URL: https://example.com
 やりたいこと: ページのタイトルと本文の内容を取得してスクショを撮る
 完了後コマンド: （空欄）
-ヘッドレスモード: Yes
 ```
 
-成功すれば `results/screenshots/` にスクリーンショット、`midscene_run/report/` にHTMLレポートが生成される。
+成功すれば `results/screenshots/` にスクリーンショットが生成される。
 
 ## トラブルシューティング
 
-### Chromium が起動しない
+### Chrome に接続できない
 
 ```bash
-# ブラウザを再インストール
-npx playwright install chromium --with-deps
+# CDPエンドポイントの応答確認
+curl http://localhost:9222/json/version
+
+# 応答しない場合: Chromeを閉じて CDP モードで再起動
+# macOS:
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222
 ```
 
-Linux の場合は追加の依存が必要な場合がある:
-
-```bash
-# Ubuntu/Debian
-sudo apt-get install -y libnss3 libatk1.0-0 libatk-bridge2.0-0 \
-  libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
-  libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2
-```
+すでに通常モードでChromeが起動している場合、そのプロセスにはCDPが有効になっていない。一度すべてのChromeウィンドウを閉じること。
 
 ### Ollama に接続できない
 
@@ -315,61 +236,8 @@ Docker 内から Ollama に接続する場合:
 
 ```bash
 # localhost ではなく host.docker.internal を使う
-MIDSCENE_MODEL_BASE_URL=http://host.docker.internal:11434/v1
-```
-
-### Midscene が 403 Forbidden を返す
-
-Ollama の CORS 設定が未反映。
-
-```bash
-# macOS: 設定後に Ollama アプリを再起動
-launchctl setenv OLLAMA_ORIGINS "*"
-# → メニューバーの Ollama アイコンから Quit → 再起動
-
-# Linux: 設定後に ollama serve を再起動
-export OLLAMA_ORIGINS="*"
-ollama serve
-```
-
-### Midscene の Vision LLM がエラーになる
-
-```bash
-# ❌ テキストのみモデル（動作しない）
-ollama pull qwen2.5:7b
-
-# ✅ Vision 対応モデル（正しい）
-ollama pull qwen2.5-vl:7b
-```
-
-MIDSCENE_MODEL_FAMILY の設定も確認:
-
-| モデル | MIDSCENE_MODEL_FAMILY |
-|--------|----------------------|
-| qwen2.5-vl | `qwen-vl` |
-| llama3.2-vision | `openai` |
-
-### 操作が非常に遅い
-
-```bash
-# GPU が使われているか確認（NVIDIA）
-nvidia-smi
-
-# Apple Silicon の場合は自動で Metal を使用
-# → 7B モデルなら 1ステップ 3〜10秒が目安
-
-# CPU のみの場合は小さいモデルに切り替え
-ollama pull qwen2.5-vl:3b    # より軽量
-```
-
-### レポートが生成されない
-
-```bash
-# midscene_run ディレクトリの権限確認
-ls -la midscene_run/
-
-# ディレクトリがなければ手動作成
-mkdir -p midscene_run/report
+# .taskp/config.toml の base_url を変更:
+base_url = "http://host.docker.internal:11434/v1"
 ```
 
 ### taskp Agent がスクリプト生成に失敗する
@@ -391,6 +259,18 @@ taskp run web-agent --model anthropic/claude-sonnet-4-20250514
 # → ollama create qwen2.5-coder-32k -f Modelfile
 ```
 
+### 要素が見つからない（not_found エラー）
+
+```bash
+# results/error-report.json を確認
+cat results/error-report.json
+
+# error.png でスクリーンショットを確認
+open results/screenshots/error.png
+```
+
+`error-report.json` の `failureType` と `candidates` を見て、descriptionをページ上の実際のラベルに合わせて修正する。
+
 ## ディレクトリ構成（セットアップ完了後）
 
 ```
@@ -400,8 +280,11 @@ web-agent-skill/
 │   └── skills/
 │       └── web-agent/
 │           ├── SKILL.md                # ✅ スキル定義
+│           ├── config.json             # ✅ 固定設定
 │           └── templates/
-│               └── agent-runner.ts     # ✅ テンプレート
+│               └── runner.ts           # ✅ テンプレート
+├── src/
+│   └── helpers/                        # ✅ ヘルパーAPI
 ├── auth/                               # ログイン状態の保存先
 ├── results/                            # 操作結果
 │   └── screenshots/                    # スクリーンショット
@@ -411,7 +294,5 @@ web-agent-skill/
 ├── package.json                        # ✅ 依存定義
 ├── biome.json                          # ✅ Biome 設定
 ├── tsconfig.json                       # ✅ TypeScript 設定
-├── .gitignore
-├── midscene_run/                       # Midscene 出力（gitignore）
-└── .taskp-tmp/                         # 一時ファイル（gitignore）
+└── .gitignore
 ```

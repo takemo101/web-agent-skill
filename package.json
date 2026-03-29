@@ -10,11 +10,11 @@
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"verify": "biome check . && tsc --noEmit && vitest run",
-		"setup": "npx playwright install chromium"
+		"setup": "npx playwright install chromium",
+		"chrome": "bun run src/chrome.ts"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.4.9",
-		"@midscene/web": "1.6.0",
 		"@playwright/test": "1.58.2",
 		"@types/bun": "1.3.11",
 		"dotenv": "16.5.0",

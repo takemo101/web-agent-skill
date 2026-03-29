@@ -18,14 +18,12 @@
 │ 毎回変わるもの → inputs（TUI で入力）               │
 │   url, task, after_command                           │
 ├─────────────────────────────────────────────────────┤
-│ たまに変えるもの → inputs + default（--set で上書き）│
-│   headless                                           │
-├─────────────────────────────────────────────────────┤
 │ 固定設定 → config.json（context で読み込み）         │
-│   screenshotDir, authDir, viewport, timeout 等       │
+│   screenshotDir, authDir, viewport, timeout,         │
+│   cdpEndpoint 等                                     │
 ├─────────────────────────────────────────────────────┤
 │ 機密情報 → .env（環境変数）                          │
-│   MIDSCENE_MODEL_NAME, API キー等                    │
+│   APIキー等                                          │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -34,7 +32,6 @@
 | 設定値 | inputs | config.json | .env |
 |--------|:---:|:---:|:---:|
 | 毎回変わる（url, task） | ✅ | — | — |
-| デフォルトで十分（headless） | ✅ default | — | — |
 | プロジェクト固有の固定値 | — | ✅ | — |
 | 機密情報（APIキー） | — | — | ✅ |
 | git 管理 | ✅ | ✅ | ❌ |
@@ -60,15 +57,6 @@ inputs:
     type: text
     message: "完了後に実行するコマンドは？（空欄でスキップ）"
     required: false
-  # --- たまに変えるもの（デフォルトあり）---
-  - name: headless
-    type: confirm
-    message: "ヘッドレスモードで実行しますか？（Noで実際のブラウザが表示されます）"
-    default: true
-  - name: bridge_mode
-    type: confirm
-    message: "Bridge Mode で実行しますか？（既存の Chrome を使います）"
-    default: false
 context:
   # --- 固定設定を読み込み ---
   - type: file
@@ -89,8 +77,7 @@ tools:
 ├── SKILL.md
 ├── config.json          ← 固定設定
 └── templates/
-    ├── agent-runner.ts
-    └── bridge-runner.ts
+    └── runner.ts
 ```
 
 ```json
@@ -98,12 +85,11 @@ tools:
   "screenshotDir": "results/screenshots",
   "authDir": "auth",
   "timeout": 30000,
+  "cdpEndpoint": "http://localhost:9222",
   "viewport": {
     "width": 1280,
     "height": 768
-  },
-  "waitAfterAction": 500,
-  "replanningCycleLimit": 20
+  }
 }
 ```
 
@@ -114,10 +100,9 @@ tools:
 | `screenshotDir` | string | `"results/screenshots"` | スクリーンショット保存先 |
 | `authDir` | string | `"auth"` | ログイン状態（storageState）の保存先 |
 | `timeout` | number | `30000` | 操作全体のタイムアウト（ms） |
+| `cdpEndpoint` | string | `"http://localhost:9222"` | Chrome CDP 接続先 |
 | `viewport.width` | number | `1280` | ブラウザのビューポート幅 |
 | `viewport.height` | number | `768` | ブラウザのビューポート高さ |
-| `waitAfterAction` | number | `500` | 各操作後の待機時間（ms） |
-| `replanningCycleLimit` | number | `20` | aiAct の自律操作最大サイクル数 |
 
 ### config.json を変更する場面
 
@@ -131,8 +116,8 @@ tools:
 # 重いサイトでタイムアウトする
 → "timeout": 60000
 
-# 複雑な操作が途中で止まる
-→ "replanningCycleLimit": 40
+# CDPポートを変えた場合
+→ "cdpEndpoint": "http://localhost:9223"
 ```
 
 ## 入力設計
@@ -187,22 +172,6 @@ cp results/screenshots/*.png ~/Dropbox/evidence/
 
 空欄の場合はコマンド実行をスキップする。
 
-### headless
-
-| 項目 | 値 |
-|------|-----|
-| 型 | `confirm` |
-| デフォルト | `true` |
-| 用途 | ブラウザの表示/非表示切替 |
-
-### bridge_mode
-
-| 項目 | 値 |
-|------|-----|
-| 型 | `confirm` |
-| デフォルト | `false` |
-| 用途 | 既存の Chrome を使う Bridge Mode 切替 |
-
 ### 実行パターン
 
 ```bash
@@ -214,12 +183,6 @@ taskp run web-agent --skip-prompt \
   --set url="https://example.com" \
   --set task="記事をスクショ" \
   --set after_command="slack-notify.sh"
-
-# デバッグ: headed モードで実行
-taskp run web-agent --set headless=false
-
-# Bridge Mode で実行
-taskp run web-agent --set bridge_mode=true
 ```
 
 ## SKILL.md 本文設計
@@ -230,7 +193,6 @@ taskp run web-agent --set bridge_mode=true
 ## 操作対象
 
 - **URL**: {{url}}
-- **ヘッドレスモード**: {{headless}}
 
 ## やりたいこと
 
@@ -254,7 +216,7 @@ taskp run web-agent --set bridge_mode=true
 
 ### Step 1: 操作スクリプトの生成
 
-`{{__skill_dir__}}/templates/agent-runner.ts` を参考にして、上記の操作内容を Midscene API で実装したスクリプトを `{{__cwd__}}/.taskp-tmp/agent-run.ts` に生成してください。
+`{{__skill_dir__}}/templates/runner.ts` を参考にして、上記の操作内容を agent ヘルパーAPIで実装したスクリプトを `{{__cwd__}}/.taskp-tmp/agent-run.ts` に生成してください。
 
 ### Step 2: スクリプトの実行
 
@@ -263,6 +225,19 @@ bash ツールで以下のコマンドを実行してください:
 \`\`\`
 bun run {{__cwd__}}/.taskp-tmp/agent-run.ts
 \`\`\`
+
+**失敗時のリペアループ:**
+
+スクリプトが失敗した場合:
+1. `results/error-report.json` を `read` ツールで読む
+2. `results/screenshots/error.png` を確認する
+3. エラーレポートの `failureType` に応じて:
+   - `not_found`: description を変更（ページ上の実際のラベルに合わせる）
+   - `ambiguous`: `agent.section()` でスコープを絞る
+   - `not_actionable`: `agent.waitForVisible()` を追加するか、エスケープハッチを使う
+   - `timeout`: タイムアウト値を増やすか、待機条件を変更する
+4. スクリプトを修正して再実行（**最大1回のリトライ**）
+5. 2回目も失敗した場合はエラーを報告して停止する
 
 ### Step 3: 完了後コマンドの実行
 
@@ -274,76 +249,89 @@ bun run {{__cwd__}}/.taskp-tmp/agent-run.ts
 以下を報告してください:
 - 実行した操作の概要
 - 保存されたスクリーンショットのパス
-- HTMLレポートのパス
 - 完了後コマンドの実行結果（該当する場合）
 ```
 
-### 3. Midscene API リファレンスセクション
+### 3. Agent API リファレンスセクション
 
 ```markdown
-## Midscene API リファレンス
+## Agent API リファレンス
 
-### 自律操作（Auto Planning）
+`createAgent(page)` で作成した agent を使ってスクリプトを生成してください。
+**生のCSSセレクタやXPathは使わないでください。** agent が内部で最適な要素を自動検出します。
 
-| API | 用途 | 例 |
-|-----|------|-----|
-| `agent.aiAct(prompt)` | 複雑な操作を自律的に実行 | `'記事を開いてコメントを書いて投稿する'` |
-| `agent.ai(prompt)` | aiAct の短縮形 | `'ログインボタンを押す'` |
-
-aiAct は内部でループを回し、毎回スクリーンショットを撮って次の操作を判断する。
-1つの aiAct に複数ステップの指示を含めてよい。
-
-### 直接操作（Instant Action）
-
-| API | 用途 | 例 |
-|-----|------|-----|
-| `agent.aiTap(target)` | 要素をクリック | `'投稿ボタン'` |
-| `agent.aiInput(target, {value})` | テキスト入力 | `'検索欄', {value: 'キーワード'}` |
-| `agent.aiKeyboardPress(target, {keyName})` | キー押下 | `'入力欄', {keyName: 'Enter'}` |
-| `agent.aiScroll(target, opts)` | スクロール | `'記事一覧', {direction: 'down'}` |
-
-### データ取得
-
-| API | 用途 | 例 |
-|-----|------|-----|
-| `agent.aiQuery(schema)` | ページからデータ抽出 | `'{title: string, url: string}[]'` |
-| `agent.aiBoolean(question)` | Yes/No 判定 | `'ログイン済みか？'` |
-| `agent.aiString(question)` | テキスト取得 | `'ページタイトルは？'` |
-
-### 待機・確認
-
-| API | 用途 | 例 |
-|-----|------|-----|
-| `agent.aiWaitFor(condition, opts)` | 条件成立まで待機 | `'ページが読み込まれた', {timeoutMs: 10000}` |
-| `agent.aiAssert(condition)` | 条件を検証 | `'投稿完了メッセージが表示されている'` |
-
-### スクリーンショット（Playwright）
-
-| API | 用途 |
-|-----|------|
-| `await page.screenshot({path: '...', fullPage: false})` | ビューポート内をキャプチャ |
-| `await page.screenshot({path: '...', fullPage: true})` | ページ全体をキャプチャ |
-
-### 重要な注意事項
-
-- aiAct は「今の画面を見て判断する」ため、前の操作を覚えていない
-- 「さっきの」「それ」のような指示語は使えない
-- ページ遷移後は aiWaitFor で遷移完了を待つこと
-- スクリーンショットは `results/screenshots/` に保存すること
-- 抽出データは console.log で stdout に出力すること
+詳細なAPIリファレンスは [docs/PLAYWRIGHT-CDP.md](../docs/PLAYWRIGHT-CDP.md) を参照してください。
 ```
 
-## レポート・スクリーンショット出力設計
+## テンプレート設計
 
-### 出力一覧
+`runner.ts` — CDPで接続し、agentヘルパーを使う標準テンプレート。
 
-| 出力 | 生成元 | 保存先 | 用途 |
-|------|--------|--------|------|
-| HTMLレポート | Midscene 自動 | `midscene_run/report/*.html` | 全ステップのスクリーンショット + 操作内容 |
-| スクリーンショット | Playwright 個別撮影 | `results/screenshots/*.png` | エビデンス、共有、後続処理 |
-| 抽出データ | stdout / ファイル | `results/data/` | 完了後コマンドへの入力 |
+```
+.taskp/skills/web-agent/templates/
+└── runner.ts    ← 唯一のテンプレート
+```
 
-### スクリプト生成時のルール
+テンプレートの構造:
+
+```typescript
+import { mkdirSync, writeFileSync } from "fs";
+import { chromium } from "playwright";
+import { createAgent } from "../src/helpers/index.ts";
+
+const TARGET_URL = "{{TARGET_URL}}";
+const CDP_ENDPOINT = "{{CDP_ENDPOINT}}";
+const SCREENSHOT_DIR = "{{SCREENSHOT_DIR}}";
+const TIMEOUT = {{TIMEOUT}};
+
+mkdirSync(SCREENSHOT_DIR, { recursive: true });
+
+const browser = await chromium.connectOverCDP(CDP_ENDPOINT);
+const context = browser.contexts()[0];
+const page = await context.newPage();
+
+await page.goto(TARGET_URL, { timeout: TIMEOUT, waitUntil: "domcontentloaded" });
+
+const agent = createAgent(page);
+
+let exitCode = 0;
+try {
+  // === LLMが生成するコード ===
+
+  await agent.screenshot(`${SCREENSHOT_DIR}/final.png`);
+  console.log("✅ 操作完了");
+} catch (error) {
+  try {
+    await agent.screenshot(`${SCREENSHOT_DIR}/error.png`);
+  } catch {}
+
+  if (error && typeof (error as any).toJSON === "function") {
+    const report = {
+      ...(error as any).toJSON(),
+      screenshot: `${SCREENSHOT_DIR}/error.png`,
+      url: page.url(),
+    };
+    writeFileSync("results/error-report.json", JSON.stringify(report, null, 2));
+    console.error("❌ 操作失敗（error-report.json に詳細を出力）:", (error as Error).message);
+  } else {
+    console.error("❌ 操作失敗:", (error as Error).message);
+  }
+  exitCode = 1;
+} finally {
+  await page.close();
+  browser.disconnect();
+  process.exit(exitCode);
+}
+```
+
+**テンプレートの重要なポイント:**
+
+- `browser.disconnect()` — ユーザーのChromeを閉じない（`browser.close()` は使わない）
+- `page.close()` — 開いたタブだけ閉じる
+- `context.newPage()` — 常に新しいタブを開く（既存タブをハイジャックしない）
+- `error-report.json` — リペアループ用の構造化エラー出力
+
+## スクリプト生成時のルール
 
 Agent がスクリプトを生成する際、以下を守ること:
 
@@ -352,28 +340,9 @@ Agent がスクリプトを生成する際、以下を守ること:
 3. **抽出データは `console.log` で stdout に出力**する（JSON 推奨）
 4. **完了後コマンドが指定されている場合は操作完了後に bash で実行**する
 5. **ディレクトリは `mkdirSync` で事前作成**する
+6. **生のCSSセレクタやXPathは使わない** — agent ヘルパーAPIを使う
 
-```typescript
-import { mkdirSync } from "fs";
-
-mkdirSync("results/screenshots", { recursive: true });
-
-try {
-  // ... 操作 ...
-
-  // 最終スクリーンショット
-  await page.screenshot({ path: "results/screenshots/final.png" });
-  console.log("✅ 操作完了");
-} catch (error) {
-  await page.screenshot({ path: "results/screenshots/error.png" });
-  console.error("❌ 操作失敗:", (error as Error).message);
-  process.exit(1);
-} finally {
-  await browser.close();
-}
-```
-
-### ターミナル出力フォーマット
+## ターミナル出力フォーマット
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -393,9 +362,6 @@ URL:    https://news.example.com
    results/screenshots/article-2.png
    results/screenshots/article-3.png
    results/screenshots/final.png
-
-📊 HTMLレポート:
-   midscene_run/report/abc123.html
 
 🔧 完了後コマンド実行: slack-notify.sh
    → 正常終了 (exit 0)
@@ -418,10 +384,6 @@ actions:
         type: text
         message: "完了後コマンド（空欄可）"
         required: false
-      - name: headless
-        type: confirm
-        message: "ヘッドレスモード？"
-        default: true
   login:
     description: サイトにログインしてセッションを保存する
     mode: agent
@@ -483,9 +445,6 @@ taskp run web-agent
 
 ? 完了後に実行するコマンドは？（空欄でスキップ）
 > echo "$(cat results/data/articles.json)" | jq .
-
-? ヘッドレスモードで実行しますか？ [Y/n]
-> Y
 ```
 
 ### 出力
@@ -505,8 +464,6 @@ taskp run web-agent
    results/screenshots/article-5.png
    results/screenshots/final.png
 
-📊 HTMLレポート: midscene_run/report/abc123.html
-
 🔧 完了後コマンド実行:
 [
   {"title": "Show HN: ...", "points": 342},
@@ -522,6 +479,5 @@ taskp run web-agent
 0 9 * * * cd /path/to/project && taskp run web-agent --skip-prompt \
   --set url="https://news.ycombinator.com" \
   --set task="トップ5記事のタイトルとURLを取得してスクショ" \
-  --set after_command="slack-notify.sh" \
-  --set headless=true
+  --set after_command="slack-notify.sh"
 ```

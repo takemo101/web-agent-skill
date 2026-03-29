@@ -32,12 +32,14 @@
 
 ### 解決アプローチ
 
-Vision LLM がスクリーンショットを見てページを理解し、自然言語の指示に従って自律的に操作する。
+LLMがヘルパーAPIを使ったコードを生成し、ヘルパーがDOM直接アクセスで要素を特定して操作する。セレクタではなく意味的な記述（「投稿ボタン」「メールアドレス欄」）で要素を指定するため、UI変更に強い。
 
 ```
 従来: page.click('button[data-testid="submit"]')  ← UI変更で壊れる
-本ツール: 「送信ボタンをクリックする」               ← 見た目で判断、壊れにくい
+本ツール: agent.clickButton('送信')                ← ラベルで判断、壊れにくい
 ```
+
+Playwright CDPで既存のChromeに接続するため、ログイン済みのセッションやCookie、Chrome拡張機能をそのまま利用できる。
 
 ## ユースケース
 
@@ -99,8 +101,8 @@ cron で毎朝実行し、チームに共有。
 | コンポーネント | 担当するOSS | 役割 |
 |---------------|-------------|------|
 | スキル実行基盤 | [taskp](https://github.com/takemo101/taskp) | 入力収集・LLM連携・実行管理 |
-| ブラウザ自動化 | [Midscene.js](https://github.com/web-infra-dev/midscene) | Vision LLM による自律的UI操作 |
-| ブラウザエンジン | [Playwright](https://playwright.dev/) | ブラウザ制御・スクリーンショット |
+| ブラウザ接続 | [Playwright](https://playwright.dev/) CDP | 既存ChromeへのCDP接続・DOM操作 |
+| ヘルパーAPI | createAgent(page) | 自然言語記述によるDOM要素特定 |
 
 ### 調査した関連ツール
 
@@ -114,8 +116,9 @@ cron で毎朝実行し、チームに共有。
 
 1. **taskp スキルとして動作** — 既存の taskp エコシステムに統合
 2. **完了後コマンド実行** — 操作結果を後続処理に連携
-3. **ローカルLLM対応** — Ollama で完全無料実行可能
+3. **ローカルLLM対応** — Ollama で完全無料実行可能（Vision LLM不要）
 4. **CLIファースト** — cron / CI との統合が容易
+5. **既存Chromeを使用** — ログイン状態を維持、storageState管理が不要
 
 ## スコープ
 
@@ -123,10 +126,11 @@ cron で毎朝実行し、チームに共有。
 
 - [x] taskp スキルとしてのブラウザ操作（`taskp run web-agent`）
 - [x] 自然言語による操作指示
+- [x] CDP接続による既存Chrome利用
+- [x] ヘルパーAPIによるDOM直接操作
 - [x] スクリーンショット撮影（任意タイミング + 最終状態）
 - [x] 操作完了後のコマンド実行
-- [x] ヘッドレス / headed 切り替え
-- [x] HTMLレポート自動生成
+- [x] リペアループ（失敗時の自動修正・1回リトライ）
 
 ### v2 以降の検討事項
 
@@ -135,3 +139,4 @@ cron で毎朝実行し、チームに共有。
 - [ ] 結果の通知連携（Slack / Discord）
 - [ ] 定期実行テンプレート（cron 設定生成）
 - [ ] 操作手順のテンプレート保存・再利用
+- [ ] iframe 対応（`agent.inFrame()`）

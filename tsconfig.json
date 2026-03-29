@@ -14,5 +14,5 @@
 		"types": ["bun-types"]
 	},
 	"include": ["src/**/*.ts"],
-	"exclude": ["node_modules", ".taskp-tmp", "midscene_run"]
+	"exclude": ["node_modules", ".taskp-tmp"]
 }

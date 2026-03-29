@@ -2,10 +2,9 @@
   "screenshotDir": "results/screenshots",
   "authDir": "auth",
   "timeout": 30000,
+  "cdpEndpoint": "http://localhost:9222",
   "viewport": {
     "width": 1280,
     "height": 768
-  },
-  "waitAfterAction": 500,
-  "replanningCycleLimit": 20
+  }
 }

@@ -7,10 +7,11 @@ AIによる汎用ブラウザ操作エージェント。taskp スキル。
 ## 特徴
 
 - **自然言語で操作指示** — 「記事を開いてスクショを撮って」「フォームに入力して送信して」
-- **自律的なページ操作** — Vision LLM がページを見て判断・操作
+- **DOM直接操作** — ヘルパーAPIがDOM要素を自動特定、CSSセレクタ不要
+- **既存Chromeを使用** — CDP接続でログイン済みのセッション・Cookieをそのまま利用
 - **スクリーンショット撮影** — 任意のタイミングで画面をキャプチャ
 - **完了後コマンド実行** — 操作結果を後続のスクリプトやツールに連携
-- **ローカルLLM対応** — Ollama で完全無料実行可能
+- **ローカルLLM対応** — Ollama で完全無料実行可能（Vision LLM不要）
 - **定期実行対応** — cron / CI と組み合わせて自動化
 
 ## ユースケース
@@ -42,6 +43,9 @@ taskp run web-agent
 bun install
 bun run setup
 
+# Chrome を CDP モードで起動（macOS）
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222
+
 # LLM設定（.env を編集）
 cp .env.example .env
 
@@ -54,8 +58,8 @@ taskp run web-agent
 | コンポーネント | 技術 |
 |---------------|------|
 | スキル実行基盤 | [taskp](https://github.com/takemo101/taskp) |
-| ブラウザ自動化 | [Midscene.js](https://github.com/web-infra-dev/midscene) |
-| ブラウザエンジン | [Playwright](https://playwright.dev/) (Chromium) |
+| ブラウザ接続 | [Playwright](https://playwright.dev/) CDP |
+| ヘルパーAPI | createAgent(page) — DOM直接操作 |
 | lint + format | [Biome](https://biomejs.dev/) 2.4.9 |
 | 型チェック | TypeScript 6.0.2 |
 | テスト | [Vitest](https://vitest.dev/) 4.1.2 |
@@ -69,8 +73,7 @@ taskp run web-agent
 | [CONCEPT.md](./docs/CONCEPT.md) | プロジェクトの目的・背景 |
 | [ARCHITECTURE.md](./docs/ARCHITECTURE.md) | 全体アーキテクチャ |
 | [SKILL-DESIGN.md](./docs/SKILL-DESIGN.md) | taskp スキル設計 |
-| [MIDSCENE-INTEGRATION.md](./docs/MIDSCENE-INTEGRATION.md) | Midscene.js 統合 |
-| [MODEL-STRATEGY.md](./docs/MODEL-STRATEGY.md) | LLM モデル戦略 |
+| [PLAYWRIGHT-CDP.md](./docs/PLAYWRIGHT-CDP.md) | Playwright CDP + ヘルパーAPI |
 | [SETUP.md](./docs/SETUP.md) | セットアップ手順 |
 
 ## ライセンス

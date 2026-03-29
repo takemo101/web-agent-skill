@@ -25,6 +25,6 @@
 		}
 	},
 	"files": {
-		"includes": ["**", "!node_modules", "!midscene_run", "!.taskp-tmp", "!.taskp", "!dist"]
+		"includes": ["**", "!node_modules", "!.taskp-tmp", "!.taskp", "!dist"]
 	}
 }
