@@ -20,7 +20,8 @@ echo "[..] Starting Chrome with CDP..."
   --user-data-dir="${profile_dir}" \
   --profile-directory=Default \
   --no-first-run \
-  --no-default-browser-check &
+  --no-default-browser-check \
+  > /dev/null 2>&1 &
 
 # Wait for CDP to respond
 for i in $(seq 1 30); do

@@ -1,5 +1,12 @@
 #:schema https://raw.githubusercontent.com/takemo101/taskp/main/.taskp/config.schema.json
 
+[ai]
+default_provider = "cli-proxy"
+
+[ai.providers.cli-proxy]
+base_url = "http://127.0.0.1:8317/v1"
+api_key_env = "CLI_PROXY_API_KEY"
+
 [mcp.servers.playwriter]
 transport = "stdio"
 command = "npx"
