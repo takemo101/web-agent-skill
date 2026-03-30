@@ -6,4 +6,4 @@ command = "npx"
 args = ["-y", "playwriter@latest"]
 
 [mcp.servers.playwriter.env]
-PLAYWRITER_AUTO_ENABLE = "1"
+PLAYWRITER_DIRECT = "1"
