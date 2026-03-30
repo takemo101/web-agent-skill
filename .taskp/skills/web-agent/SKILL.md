@@ -46,8 +46,14 @@ await snapshot({ page })
 
 ### 3. スクリーンショット
 
+操作の確認用（ラベル付き、AI向け）:
 ```javascript
 await screenshotWithAccessibilityLabels({ page })
+```
+
+保存用（ラベルなし、人間向け）:
+```javascript
+await page.screenshot({ path: 'screenshot.png' })
 ```
 
 ### 4. データ抽出

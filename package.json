@@ -4,6 +4,8 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
+		"setup": "bash scripts/setup.sh",
+		"chrome": "bash scripts/chrome.sh",
 		"check": "biome check .",
 		"check:fix": "biome check --fix ."
 	},
