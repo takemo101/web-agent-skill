@@ -11,8 +11,8 @@ inputs:
     type: textarea
     message: "やりたいことを自然言語で入力してください"
 hooks:
-  before: scripts/chrome.sh
-  after: scripts/cleanup.sh
+  before: "$TASKP_SKILL_DIR/scripts/chrome.sh"
+  after: "$TASKP_SKILL_DIR/scripts/cleanup.sh"
 tools:
   - mcp:playwriter
 ---
